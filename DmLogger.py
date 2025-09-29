@@ -4,6 +4,8 @@ def script_function():
         updateConfigData("dm_logger_enabled", True)
     if getConfigData().get("dm_webhook_url") is None:
         updateConfigData("dm_webhook_url", "")
+    if getConfigData().get("embed_color") is None:
+        updateConfigData("embed_color", "5865F2")
     
     # --- Asynchronous Helper for requests ---
     async def run_in_thread(func, *args, **kwargs):
@@ -76,15 +78,16 @@ def script_function():
         if webhook_url:
             # Create embed for webhook
             embed_data = {
-                "title": "📨 New Direct Message",
-                "description": message.clean_content if message.clean_content else "*[No text content]*",
-                "color": 0x5865F2,  # Discord blurple
+                "title": "New Direct Message",
+                "description": f"> {message.clean_content}" if message.clean_content else "> *[No text content]*",
+                "color": int(getConfigData().get("embed_color", "5865F2"), 16),
                 "fields": [
                     {"name": "From", "value": f"{message.author.name} ({message.author.mention})", "inline": True},
                     {"name": "User ID", "value": str(message.author.id), "inline": True},
+                    {"name": "Message Link", "value": f"[Jump to Message]({message.jump_url})", "inline": True},
                     {"name": "Timestamp", "value": timestamp, "inline": False}
                 ],
-                "footer": {"text": "DM Logger"},
+                "footer": {"text": "DM Logger Enhanced"},
                 "thumbnail": {"url": str(message.author.avatar.url) if message.author.avatar else ""}
             }
             
