@@ -1,3 +1,8 @@
+import requests
+import json
+import asyncio
+from datetime import datetime
+
 def script_function():    
     # Initialize default config values
     if getConfigData().get("dm_logger_enabled") is None:
