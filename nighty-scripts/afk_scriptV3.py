@@ -344,7 +344,7 @@ def ping_afk_system():
         afk_server = getConfigData().get(f"{CONFIG_PREFIX}afk_server", True)
         afk_cooldown = getConfigData().get(f"{CONFIG_PREFIX}afk_cooldown", 60)
         
-        help_content = f"""# Ping Tracker & AFK System Help
+        help_content = f"""# AFK System Help
 
 ## Ping Commands
 
@@ -362,7 +362,7 @@ def ping_afk_system():
 > **{prefix}afks <true/false>** - Enable/disable server responses
 > **{prefix}afkc <seconds>** - Set cooldown between responses
 
-## ⚙️ Current Settings
+## Current Settings
 
 > **AFK Status:** {'Enabled' if afk_enabled else 'Disabled'}
 > **AFK Message:** {afk_message}
