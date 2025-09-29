@@ -1,4 +1,4 @@
-def ping_afk_system():
+def ping_afk_system():    
     CONFIG_PREFIX = "ping_afk_"
     
     # Initialize default configuration
@@ -405,23 +405,12 @@ def ping_afk_system():
         afk_server = getConfigData().get(f"{CONFIG_PREFIX}afk_server", True)
         afk_cooldown = getConfigData().get(f"{CONFIG_PREFIX}afk_cooldown", 60)
         
-        help_content = f"""# Ping Tracker & AFK System Help
+        help_content = f"""# Ping Tracker & AFK System
 
 ## Ping Commands
 
 > **{prefix}pings** - Display the most recent pings in this channel
 > Shows the last 10 pings with timestamps, usernames, and jump links
-
-## AFK Commands
-
-> **{prefix}afk** - Toggle AFK mode on/off
-> **{prefix}afkm <message>** - Set your custom AFK message
-> **{prefix}afkd <seconds>** - Set delay before responding
-> **{prefix}afkt <true/false>** - Enable/disable typing indicator
-> **{prefix}afktl <seconds>** - Set typing indicator duration
-> **{prefix}afkr <true/false>** - Enable/disable auto-replies
-> **{prefix}afks <true/false>** - Enable/disable server responses
-> **{prefix}afkc <seconds>** - Set cooldown between responses
 
 ## Current Settings
 
@@ -433,21 +422,16 @@ def ping_afk_system():
 > **Server Responses:** {'Enabled' if afk_server else 'Disabled'}
 > **Response Cooldown:** {afk_cooldown} seconds
 
-## Examples
+## AFK Commands
 
-> **{prefix}afk** - Toggle AFK on/off
-> **{prefix}afkm Back in 30 minutes!** - Custom message
-> **{prefix}afkd 5** - Wait 5 seconds before responding
-> **{prefix}afkt false** - Disable typing indicator
-> **{prefix}afkc 120** - Set 2-minute cooldown per user
-
-## Notes
-
-> • AFK auto-disables when you send any message
-> • Only tracks direct @mentions (not @everyone/@here)
-> • Server setting doesn't affect DMs or group chats
-> • Cooldown prevents spam and rate limiting
-> • Run any command without arguments to see current value"""
+> **{prefix}afk** - Toggle AFK mode on/off
+> **{prefix}afkm <message>** - Set your custom AFK message
+> **{prefix}afkd <seconds>** - Set delay before responding
+> **{prefix}afkt <true/false>** - Enable/disable typing indicator
+> **{prefix}afktl <seconds>** - Set typing indicator duration
+> **{prefix}afkr <true/false>** - Enable/disable auto-replies
+> **{prefix}afks <true/false>** - Enable/disable server responses
+> **{prefix}afkc <seconds>** - Set cooldown between responses"""
         
         try:
             await forwardEmbedMethod(
