@@ -1,3 +1,9 @@
+@nightyScript(
+    name="Ping Tracker & AFK",
+    author="thedorekaczynski",
+    description="Track recent pings and manage AFK status with auto-responses",
+    usage="<p>pings | <p>afk | <p>afkm <message> | <p>afkd <seconds> | <p>afkt <true/false> | <p>afktl <seconds> | <p>afkr <true/false> | <p>afks <true/false> | <p>afkc <seconds>"
+)
 def ping_afk_system():
     """
     PING TRACKER & AFK SYSTEM
@@ -383,12 +389,12 @@ def ping_afk_system():
         
         help_content = f"""# Ping Tracker & AFK System Help
 
-## Ping Commands
+## 📋 Ping Commands
 
 > **{prefix}pings** - Display the most recent pings in this channel
 > Shows the last 10 pings with timestamps, usernames, and jump links
 
-## AFK Commands
+## 🌙 AFK Commands
 
 > **{prefix}afk** - Toggle AFK mode on/off
 > **{prefix}afkm <message>** - Set your custom AFK message
@@ -399,17 +405,17 @@ def ping_afk_system():
 > **{prefix}afks <true/false>** - Enable/disable server responses
 > **{prefix}afkc <seconds>** - Set cooldown between responses
 
-## Current Settings
+## ⚙️ Current Settings
 
-> **AFK Status:** {'Enabled' if afk_enabled else 'Disabled'}
+> **AFK Status:** {'🟢 Enabled' if afk_enabled else '🔴 Disabled'}
 > **AFK Message:** {afk_message}
 > **Response Delay:** {afk_delay} seconds
-> **Typing Indicator:** {'Enabled' if afk_typing else 'Disabled'} ({afk_typing_length}s)
-> **Auto-Reply:** {'Enabled' if afk_reply else 'Disabled'}
-> **Server Responses:** {'Enabled' if afk_server else 'Disabled'}
+> **Typing Indicator:** {'✅ Enabled' if afk_typing else '❌ Disabled'} ({afk_typing_length}s)
+> **Auto-Reply:** {'✅ Enabled' if afk_reply else '❌ Disabled'}
+> **Server Responses:** {'✅ Enabled' if afk_server else '❌ Disabled'}
 > **Response Cooldown:** {afk_cooldown} seconds
 
-## Examples
+## 💡 Examples
 
 > **{prefix}afk** - Toggle AFK on/off
 > **{prefix}afkm Back in 30 minutes!** - Custom message
@@ -417,7 +423,7 @@ def ping_afk_system():
 > **{prefix}afkt false** - Disable typing indicator
 > **{prefix}afkc 120** - Set 2-minute cooldown per user
 
-## Notes
+## 📝 Notes
 
 > • AFK auto-disables when you send any message
 > • Only tracks direct @mentions (not @everyone/@here)
