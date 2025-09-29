@@ -1,8 +1,3 @@
-from pathlib import Path
-import json
-from datetime import datetime, timedelta
-import asyncio
-
 def ping_afk_system():
     """
     PING TRACKER & AFK SYSTEM
@@ -38,6 +33,11 @@ def ping_afk_system():
     - Cooldown prevents spam and rate limiting
     - Server setting doesn't affect DMs/group chats
     """
+    
+    from pathlib import Path
+    import json
+    from datetime import datetime, timedelta
+    import asyncio
     
     # Configuration keys
     CONFIG_PREFIX = "ping_afk_"
@@ -426,14 +426,17 @@ def ping_afk_system():
 > • Run any command without arguments to see current value"""
         
         try:
-            await forwardEmbedMethod(
-                channel_id=ctx.channel.id,
-                content=help_content,
-                title="Help Menu"
-            )
-        except Exception as e:
-            print(f"Error sending help embed: {e}", type_="ERROR")
-            await ctx.send(f"> Error displaying help: {e}", delete_after=5)
+            # Disable private mode temporarily to ensure embed sends
+            current_private = getConfigData().get("private")
+            updateConfigData("private", False)
+            
+            try:
+                await forwardEmbedMethod(
+                    channel_id=ctx.channel.id,
+                    content=help_content,
+                    title="Help Menu"
+                )
+            finally:
     
     # Event listener: Track pings and handle AFK
     @bot.listen("on_message")
@@ -533,6 +536,10 @@ def ping_afk_system():
         # Ignore if message is a command (starts with prefix)
         prefix = getConfigData().get("prefix", ".")
         if message.content.startswith(prefix):
+            return
+        
+        # Ignore if message starts with ">" (our status messages)
+        if message.content.startswith(">"):
             return
         
         # Disable AFK
