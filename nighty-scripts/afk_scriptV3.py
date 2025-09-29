@@ -1,4 +1,4 @@
-def ping_afk_system():        
+def ping_afk_system():
     # Configuration keys
     CONFIG_PREFIX = "ping_afk_"
     
@@ -149,6 +149,21 @@ def ping_afk_system():
             
             if afk_start:
                 afk_start_time = datetime.fromisoformat(afk_start)
+                afk_end_time = datetime.now()
+                
+                # Calculate how long they were AFK
+                afk_duration = afk_end_time - afk_start_time
+                hours = int(afk_duration.total_seconds() // 3600)
+                minutes = int((afk_duration.total_seconds() % 3600) // 60)
+                seconds = int(afk_duration.total_seconds() % 60)
+                
+                if hours > 0:
+                    duration_str = f"{hours}h {minutes}m {seconds}s"
+                elif minutes > 0:
+                    duration_str = f"{minutes}m {seconds}s"
+                else:
+                    duration_str = f"{seconds}s"
+                
                 channel_id = str(ctx.channel.id)
                 pings_data = load_pings()
                 
@@ -176,7 +191,7 @@ def ping_afk_system():
                         
                         ping_list.append(f"> {time_str} **{username}** ({user_id}) [Jump]({message_link})")
                     
-                    content = f"# Pings While AFK ({len(all_afk_pings)} total)\n\n" + "\n".join(ping_list)
+                    content = f"# Pings While AFK\n\n> **Duration:** {duration_str}\n> **Total Pings:** {len(all_afk_pings)}\n\n" + "\n".join(ping_list)
                     
                     try:
                         await forwardEmbedMethod(
@@ -186,9 +201,9 @@ def ping_afk_system():
                         )
                     except Exception as e:
                         print(f"Error sending AFK pings embed: {e}", type_="ERROR")
-                        await ctx.send(f"> You received {len(all_afk_pings)} pings while AFK. Error displaying: {e}", delete_after=10)
+                        await ctx.send(f"> You received {len(all_afk_pings)} pings while AFK for {duration_str}. Error displaying: {e}", delete_after=10)
                 else:
-                    await ctx.send("> You are no longer AFK. No pings received while away.", delete_after=5)
+                    await ctx.send(f"> You are no longer AFK. No pings received during {duration_str}.", delete_after=5)
             else:
                 await ctx.send("> You are no longer AFK.", delete_after=3)
             
@@ -511,7 +526,7 @@ def ping_afk_system():
         
         afk_message = getConfigData().get(f"{CONFIG_PREFIX}afk_message", "I'm currently AFK")
         try:
-            await message.reply(f"> {afk_message}", mention_author=False)
+            await message.reply(afk_message, mention_author=False)
             set_cooldown(user_id)
             print(f"AFK response sent to {message.author}", type_="SUCCESS")
         except Exception as e:
