@@ -127,7 +127,7 @@ def script_function():
         name="ignore",
         aliases=["ig"],
         usage="<@user or user_id>",
-        description="Ignore a user's messages (local filter only)"
+        description="Ignore a user's messages (uses Discord's suppress feature)"
     )
     async def ignore_user(ctx, *, args: str = ""):
         await ctx.message.delete()
@@ -141,25 +141,32 @@ def script_function():
             await ctx.send("> Invalid user mention or ID format.", delete_after=5)
             return
         
-        ignored_users = load_ignored_users()
-        
-        if user_id in ignored_users:
-            await ctx.send(f"> User `{user_id}` is already ignored.", delete_after=5)
-            return
+        # Check if already ignored to prevent errors
+        try:
+            async for relationship in bot.user.relationships:
+                if str(relationship.user.id) == user_id and relationship.type.name == "implicit":
+                    await ctx.send(f"> User `{user_id}` is already ignored.", delete_after=5)
+                    return
+        except Exception as e:
+            print(f"Error checking ignore status: {e}", type_="ERROR")
         
         try:
-            # Try to fetch user info for confirmation
+            # Attempt to fetch the user
             user = await bot.fetch_user(int(user_id))
-            username = user.name
-        except:
-            username = "Unknown User"
-        
-        ignored_users.append(user_id)
-        if save_ignored_users(ignored_users):
-            await ctx.send(f"> Now ignoring **{username}** (`{user_id}`)", delete_after=5)
-            print(f"Added user to ignore list: {username} ({user_id})", type_="SUCCESS")
-        else:
-            await ctx.send("> Failed to save ignore list.", delete_after=5)
+            
+            # Ignore the user via Discord API (suppress messages)
+            await user.ignore()
+            
+            await ctx.send(f"> Successfully ignored **{user.name}** (`{user_id}`)", delete_after=5)
+            print(f"Ignored user: {user.name} ({user_id})", type_="SUCCESS")
+            
+        except ValueError:
+            await ctx.send("> Invalid user ID format.", delete_after=5)
+        except AttributeError:
+            await ctx.send("> Ignore feature may not be available in this Discord version.", delete_after=5)
+        except Exception as e:
+            await ctx.send(f"> Failed to ignore user: {str(e)}", delete_after=5)
+            print(f"Error ignoring user {user_id}: {e}", type_="ERROR")
     
     @bot.command(
         name="unignore",
@@ -179,25 +186,23 @@ def script_function():
             await ctx.send("> Invalid user mention or ID format.", delete_after=5)
             return
         
-        ignored_users = load_ignored_users()
-        
-        if user_id not in ignored_users:
-            await ctx.send(f"> User `{user_id}` is not in your ignore list.", delete_after=5)
-            return
-        
         try:
-            # Try to fetch user info for confirmation
+            # Attempt to fetch the user
             user = await bot.fetch_user(int(user_id))
-            username = user.name
-        except:
-            username = "Unknown User"
-        
-        ignored_users.remove(user_id)
-        if save_ignored_users(ignored_users):
-            await ctx.send(f"> No longer ignoring **{username}** (`{user_id}`)", delete_after=5)
-            print(f"Removed user from ignore list: {username} ({user_id})", type_="SUCCESS")
-        else:
-            await ctx.send("> Failed to save ignore list.", delete_after=5)
+            
+            # Unignore the user via Discord API
+            await user.unignore()
+            
+            await ctx.send(f"> Successfully unignored **{user.name}** (`{user_id}`)", delete_after=5)
+            print(f"Unignored user: {user.name} ({user_id})", type_="SUCCESS")
+            
+        except ValueError:
+            await ctx.send("> Invalid user ID format.", delete_after=5)
+        except AttributeError:
+            await ctx.send("> Unignore feature may not be available in this Discord version.", delete_after=5)
+        except Exception as e:
+            await ctx.send(f"> Failed to unignore user: {str(e)}", delete_after=5)
+            print(f"Error unignoring user {user_id}: {e}", type_="ERROR")
     
     @bot.command(
         name="blocklist",
@@ -233,23 +238,23 @@ def script_function():
     async def view_ignorelist(ctx):
         await ctx.message.delete()
         
-        ignored_users = load_ignored_users()
-        
-        if not ignored_users:
-            await ctx.send("> Your ignore list is empty.", delete_after=5)
-            return
-        
-        # Try to fetch usernames for better display
-        ignore_display = []
-        for user_id in ignored_users:
-            try:
-                user = await bot.fetch_user(int(user_id))
-                ignore_display.append(f"> • **{user.name}** (`{user_id}`)")
-            except:
-                ignore_display.append(f"> • Unknown User (`{user_id}`)")
-        
-        ignorelist_text = "\n".join(ignore_display)
-        await ctx.send(f"> **Ignored Users ({len(ignored_users)}):**\n{ignorelist_text}", delete_after=15)
+        try:
+            # Fetch ignored users from Discord relationships
+            ignored_users = []
+            async for relationship in bot.user.relationships:
+                if relationship.type.name == "implicit":
+                    ignored_users.append(f"> • **{relationship.user.name}** (`{relationship.user.id}`)")
+            
+            if not ignored_users:
+                await ctx.send("> Your ignore list is empty.", delete_after=5)
+                return
+            
+            ignorelist_text = "\n".join(ignored_users)
+            await ctx.send(f"> **Ignored Users ({len(ignored_users)}):**\n{ignorelist_text}", delete_after=15)
+            
+        except Exception as e:
+            await ctx.send(f"> Failed to retrieve ignore list: {str(e)}", delete_after=5)
+            print(f"Error retrieving ignore list: {e}", type_="ERROR")
     
     @bot.command(
         name="blockhelp",
@@ -280,22 +285,6 @@ def script_function():
         
         await ctx.send(help_text, delete_after=30)
     
-    # Event listener to auto-delete messages from ignored users
-    @bot.listen("on_message")
-    async def ignore_message_handler(message):
-        # Ignore self messages
-        if message.author.id == bot.user.id:
-            return
-        
-        ignored_users = load_ignored_users()
-        
-        # Check if message author is in ignore list
-        if str(message.author.id) in ignored_users:
-            try:
-                await message.delete()
-                print(f"Deleted message from ignored user: {message.author.name} ({message.author.id})", type_="INFO")
-            except Exception as e:
-                print(f"Failed to delete message from ignored user {message.author.id}: {e}", type_="ERROR")
     
     print("Block & Ignore Manager script loaded successfully.", type_="SUCCESS")
 
