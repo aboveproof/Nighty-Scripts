@@ -405,7 +405,7 @@ def ping_afk_system():
         afk_server = getConfigData().get(f"{CONFIG_PREFIX}afk_server", True)
         afk_cooldown = getConfigData().get(f"{CONFIG_PREFIX}afk_cooldown", 60)
         
-        help_content = f"""
+        help_content = f"""# Ping Tracker & AFK System Help
 
 ## Ping Commands
 
@@ -449,17 +449,13 @@ def ping_afk_system():
         if message.author.id == bot.user.id or message.author.bot:
             return
         
-        # Check if it's a DM (not a group DM, just a regular DM)
-        is_dm = message.guild is None and len(message.channel.recipients) == 2
-        
         bot_mentioned = False
         for mention in message.mentions:
             if mention.id == bot.user.id:
                 bot_mentioned = True
                 break
         
-        # In DMs, we don't need a mention. In servers/group chats, we do.
-        if not is_dm and not bot_mentioned:
+        if not bot_mentioned:
             return
         
         channel_id = str(message.channel.id)
