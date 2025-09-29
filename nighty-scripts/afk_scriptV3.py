@@ -1,9 +1,4 @@
-from pathlib import Path
-import json
-from datetime import datetime, timedelta
-import asyncio
-    
-def ping_afk_system():
+def ping_afk_system():        
     # Configuration keys
     CONFIG_PREFIX = "ping_afk_"
     
@@ -138,17 +133,69 @@ def ping_afk_system():
         
         current_status = getConfigData().get(f"{CONFIG_PREFIX}afk_enabled", False)
         new_status = not current_status
-        updateConfigData(f"{CONFIG_PREFIX}afk_enabled", new_status)
         
         if new_status:
+            # Going AFK - store the timestamp
+            updateConfigData(f"{CONFIG_PREFIX}afk_start_time", datetime.now().isoformat())
+            updateConfigData(f"{CONFIG_PREFIX}afk_enabled", new_status)
             msg = await ctx.send("> You are now AFK, deleting in 3 seconds...")
             await asyncio.sleep(3)
             await msg.delete()
             print("AFK mode enabled", type_="SUCCESS")
         else:
-            await ctx.send("> You are no longer AFK.", delete_after=3)
+            # Going un-AFK - show pings received during AFK
+            updateConfigData(f"{CONFIG_PREFIX}afk_enabled", new_status)
+            afk_start = getConfigData().get(f"{CONFIG_PREFIX}afk_start_time")
+            
+            if afk_start:
+                afk_start_time = datetime.fromisoformat(afk_start)
+                channel_id = str(ctx.channel.id)
+                pings_data = load_pings()
+                
+                # Collect all pings from all channels during AFK period
+                all_afk_pings = []
+                for ch_id, pings in pings_data.items():
+                    for ping in pings:
+                        ping_time = datetime.fromisoformat(ping["timestamp"])
+                        if ping_time >= afk_start_time:
+                            ping["channel_id"] = ch_id
+                            all_afk_pings.append(ping)
+                
+                # Sort by timestamp
+                all_afk_pings.sort(key=lambda x: x["timestamp"])
+                
+                if all_afk_pings:
+                    # Build embed content with all AFK pings
+                    ping_list = []
+                    for ping in all_afk_pings:
+                        timestamp = datetime.fromisoformat(ping["timestamp"])
+                        time_str = timestamp.strftime("%I:%M %p")
+                        username = ping["username"]
+                        user_id = ping["user_id"]
+                        message_link = ping["message_link"]
+                        
+                        ping_list.append(f"> {time_str} **{username}** ({user_id}) [Jump]({message_link})")
+                    
+                    content = f"# Pings While AFK ({len(all_afk_pings)} total)\n\n" + "\n".join(ping_list)
+                    
+                    try:
+                        await forwardEmbedMethod(
+                            channel_id=ctx.channel.id,
+                            content=content,
+                            title="AFK Pings"
+                        )
+                    except Exception as e:
+                        print(f"Error sending AFK pings embed: {e}", type_="ERROR")
+                        await ctx.send(f"> You received {len(all_afk_pings)} pings while AFK. Error displaying: {e}", delete_after=10)
+                else:
+                    await ctx.send("> You are no longer AFK. No pings received while away.", delete_after=5)
+            else:
+                await ctx.send("> You are no longer AFK.", delete_after=3)
+            
             print("AFK mode disabled", type_="SUCCESS")
             save_cooldowns({})
+            # Clear the start time
+            updateConfigData(f"{CONFIG_PREFIX}afk_start_time", None)
     
     # Command: Set AFK message
     @bot.command(
@@ -344,7 +391,7 @@ def ping_afk_system():
         afk_server = getConfigData().get(f"{CONFIG_PREFIX}afk_server", True)
         afk_cooldown = getConfigData().get(f"{CONFIG_PREFIX}afk_cooldown", 60)
         
-        help_content = f"""# AFK System Help
+        help_content = f"""# Ping Tracker & AFK System Help
 
 ## Ping Commands
 
