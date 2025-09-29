@@ -1,4 +1,51 @@
+@nightyScript(
+    name="Ping Tracker & AFK",
+    author="thedorekaczynski",
+    description="Track recent pings and manage AFK status with auto-responses",
+    usage="<p>pings | <p>afk | <p>afkm <message> | <p>afkd <seconds> | <p>afkt <true/false> | <p>afktl <seconds> | <p>afkr <true/false> | <p>afks <true/false> | <p>afkc <seconds>"
+)
 def ping_afk_system():
+    """
+    PING TRACKER & AFK SYSTEM
+    -------------------------
+    
+    Track recent mentions and manage automatic AFK responses when you're away.
+    
+    COMMANDS:
+    <p>pings - Display the most recent pings in the current channel
+    <p>afk - Toggle AFK mode on/off
+    <p>afkm <message> - Set custom AFK message
+    <p>afkd <seconds> - Set delay before AFK response (default: 0)
+    <p>afkt <true/false> - Enable/disable typing indicator when responding
+    <p>afktl <seconds> - Set typing indicator duration (default: 2)
+    <p>afkr <true/false> - Enable/disable replying to pings (default: true)
+    <p>afks <true/false> - Enable/disable AFK in servers (default: true)
+    <p>afkc <seconds> - Set cooldown between responses to same user (default: 60)
+    <p>pinghelp - Show all commands and current settings
+    
+    EXAMPLES:
+    <p>pings - Show recent pings
+    <p>afk - Toggle AFK status
+    <p>afkm Back in 30 minutes! - Set custom message
+    <p>afkd 5 - Wait 5 seconds before responding
+    <p>afkt true - Enable typing indicator
+    <p>afkr false - Disable auto-replies
+    <p>afks false - Ignore server pings (DMs still work)
+    <p>afkc 120 - Set 2-minute cooldown per user
+    
+    NOTES:
+    - Only tracks direct @mentions (not @everyone or @here)
+    - Pings are tracked per channel
+    - AFK auto-disables when you send any message
+    - Cooldown prevents spam and rate limiting
+    - Server setting doesn't affect DMs/group chats
+    """
+    
+    from pathlib import Path
+    import json
+    from datetime import datetime, timedelta
+    import asyncio
+    
     # Configuration keys
     CONFIG_PREFIX = "ping_afk_"
     
@@ -413,17 +460,6 @@ def ping_afk_system():
 > **{prefix}pings** - Display the most recent pings in this channel
 > Shows the last 10 pings with timestamps, usernames, and jump links
 
-## AFK Commands
-
-> **{prefix}afk** - Toggle AFK mode on/off
-> **{prefix}afkm <message>** - Set your custom AFK message
-> **{prefix}afkd <seconds>** - Set delay before responding
-> **{prefix}afkt <true/false>** - Enable/disable typing indicator
-> **{prefix}afktl <seconds>** - Set typing indicator duration
-> **{prefix}afkr <true/false>** - Enable/disable auto-replies
-> **{prefix}afks <true/false>** - Enable/disable server responses
-> **{prefix}afkc <seconds>** - Set cooldown between responses
-
 ## Current Settings
 
 > **AFK Status:** {'Enabled' if afk_enabled else 'Disabled'}
@@ -434,21 +470,16 @@ def ping_afk_system():
 > **Server Responses:** {'Enabled' if afk_server else 'Disabled'}
 > **Response Cooldown:** {afk_cooldown} seconds
 
-## Examples
+## AFK Commands
 
-> **{prefix}afk** - Toggle AFK on/off
-> **{prefix}afkm Back in 30 minutes!** - Custom message
-> **{prefix}afkd 5** - Wait 5 seconds before responding
-> **{prefix}afkt false** - Disable typing indicator
-> **{prefix}afkc 120** - Set 2-minute cooldown per user
-
-## Notes
-
-> • AFK auto-disables when you send any message
-> • Only tracks direct @mentions (not @everyone/@here)
-> • Server setting doesn't affect DMs or group chats
-> • Cooldown prevents spam and rate limiting
-> • Run any command without arguments to see current value"""
+> **{prefix}afk** - Toggle AFK mode on/off
+> **{prefix}afkm <message>** - Set your custom AFK message
+> **{prefix}afkd <seconds>** - Set delay before responding
+> **{prefix}afkt <true/false>** - Enable/disable typing indicator
+> **{prefix}afktl <seconds>** - Set typing indicator duration
+> **{prefix}afkr <true/false>** - Enable/disable auto-replies
+> **{prefix}afks <true/false>** - Enable/disable server responses
+> **{prefix}afkc <seconds>** - Set cooldown between responses"""
         
         try:
             await forwardEmbedMethod(
@@ -547,6 +578,16 @@ def ping_afk_system():
             return
         
         if message.content.startswith(">"):
+            return
+        
+        # Check if this is an AFK auto-response by checking if it's a reply
+        if message.reference is not None:
+            # This is a reply, likely our AFK auto-response, so don't disable AFK
+            return
+        
+        # Check if message matches the AFK message (it's our auto-response)
+        afk_message = getConfigData().get(f"{CONFIG_PREFIX}afk_message", "I'm currently AFK")
+        if message.content == afk_message:
             return
         
         updateConfigData(f"{CONFIG_PREFIX}afk_enabled", False)
