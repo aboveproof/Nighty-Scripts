@@ -1,44 +1,9 @@
+from pathlib import Path
+import json
+from datetime import datetime, timedelta
+import asyncio
+    
 def ping_afk_system():
-    """
-    PING TRACKER & AFK SYSTEM
-    -------------------------
-    
-    Track recent mentions and manage automatic AFK responses when you're away.
-    
-    COMMANDS:
-    <p>pings - Display the most recent pings in the current channel
-    <p>afk - Toggle AFK mode on/off
-    <p>afkm <message> - Set custom AFK message
-    <p>afkd <seconds> - Set delay before AFK response (default: 0)
-    <p>afkt <true/false> - Enable/disable typing indicator when responding
-    <p>afktl <seconds> - Set typing indicator duration (default: 2)
-    <p>afkr <true/false> - Enable/disable replying to pings (default: true)
-    <p>afks <true/false> - Enable/disable AFK in servers (default: true)
-    <p>afkc <seconds> - Set cooldown between responses to same user (default: 60)
-    
-    EXAMPLES:
-    <p>pings - Show recent pings
-    <p>afk - Toggle AFK status
-    <p>afkm Back in 30 minutes! - Set custom message
-    <p>afkd 5 - Wait 5 seconds before responding
-    <p>afkt true - Enable typing indicator
-    <p>afkr false - Disable auto-replies
-    <p>afks false - Ignore server pings (DMs still work)
-    <p>afkc 120 - Set 2-minute cooldown per user
-    
-    NOTES:
-    - Only tracks direct @mentions (not @everyone or @here)
-    - Pings are tracked per channel
-    - AFK auto-disables when you send any message
-    - Cooldown prevents spam and rate limiting
-    - Server setting doesn't affect DMs/group chats
-    """
-    
-    from pathlib import Path
-    import json
-    from datetime import datetime, timedelta
-    import asyncio
-    
     # Configuration keys
     CONFIG_PREFIX = "ping_afk_"
     
@@ -142,7 +107,7 @@ def ping_afk_system():
         
         # Build embed content
         ping_list = []
-        for ping in pings_data[channel_id][-10:]:  # Show last 10 pings
+        for ping in pings_data[channel_id][-10:]:
             timestamp = datetime.fromisoformat(ping["timestamp"])
             time_str = timestamp.strftime("%I:%M %p")
             username = ping["username"]
@@ -183,7 +148,6 @@ def ping_afk_system():
         else:
             await ctx.send("> You are no longer AFK.", delete_after=3)
             print("AFK mode disabled", type_="SUCCESS")
-            # Clear cooldowns when disabling AFK
             save_cooldowns({})
     
     # Command: Set AFK message
@@ -371,7 +335,6 @@ def ping_afk_system():
         
         prefix = getConfigData().get("prefix", ".")
         
-        # Get current settings
         afk_enabled = getConfigData().get(f"{CONFIG_PREFIX}afk_enabled", False)
         afk_message = getConfigData().get(f"{CONFIG_PREFIX}afk_message", "I'm currently AFK")
         afk_delay = getConfigData().get(f"{CONFIG_PREFIX}afk_delay", 0)
@@ -383,12 +346,12 @@ def ping_afk_system():
         
         help_content = f"""# Ping Tracker & AFK System Help
 
-## 📋 Ping Commands
+## Ping Commands
 
 > **{prefix}pings** - Display the most recent pings in this channel
 > Shows the last 10 pings with timestamps, usernames, and jump links
 
-## 🌙 AFK Commands
+## AFK Commands
 
 > **{prefix}afk** - Toggle AFK mode on/off
 > **{prefix}afkm <message>** - Set your custom AFK message
@@ -401,15 +364,15 @@ def ping_afk_system():
 
 ## ⚙️ Current Settings
 
-> **AFK Status:** {'🟢 Enabled' if afk_enabled else '🔴 Disabled'}
+> **AFK Status:** {'Enabled' if afk_enabled else 'Disabled'}
 > **AFK Message:** {afk_message}
 > **Response Delay:** {afk_delay} seconds
-> **Typing Indicator:** {'✅ Enabled' if afk_typing else '❌ Disabled'} ({afk_typing_length}s)
-> **Auto-Reply:** {'✅ Enabled' if afk_reply else '❌ Disabled'}
-> **Server Responses:** {'✅ Enabled' if afk_server else '❌ Disabled'}
+> **Typing Indicator:** {'Enabled' if afk_typing else 'Disabled'} ({afk_typing_length}s)
+> **Auto-Reply:** {'Enabled' if afk_reply else 'Disabled'}
+> **Server Responses:** {'Enabled' if afk_server else 'Disabled'}
 > **Response Cooldown:** {afk_cooldown} seconds
 
-## 💡 Examples
+## Examples
 
 > **{prefix}afk** - Toggle AFK on/off
 > **{prefix}afkm Back in 30 minutes!** - Custom message
@@ -417,7 +380,7 @@ def ping_afk_system():
 > **{prefix}afkt false** - Disable typing indicator
 > **{prefix}afkc 120** - Set 2-minute cooldown per user
 
-## 📝 Notes
+## Notes
 
 > • AFK auto-disables when you send any message
 > • Only tracks direct @mentions (not @everyone/@here)
@@ -426,26 +389,21 @@ def ping_afk_system():
 > • Run any command without arguments to see current value"""
         
         try:
-            # Disable private mode temporarily to ensure embed sends
-            current_private = getConfigData().get("private")
-            updateConfigData("private", False)
-            
-            try:
-                await forwardEmbedMethod(
-                    channel_id=ctx.channel.id,
-                    content=help_content,
-                    title="Help Menu"
-                )
-            finally:
+            await forwardEmbedMethod(
+                channel_id=ctx.channel.id,
+                content=help_content,
+                title="Help Menu"
+            )
+        except Exception as e:
+            print(f"Error sending help embed: {e}", type_="ERROR")
+            await ctx.send(f"> Error displaying help: {e}", delete_after=5)
     
     # Event listener: Track pings and handle AFK
     @bot.listen("on_message")
     async def ping_tracker(message):
-        # Ignore self and bots
         if message.author.id == bot.user.id or message.author.bot:
             return
         
-        # Check if bot user is mentioned (excluding @everyone and @here)
         bot_mentioned = False
         for mention in message.mentions:
             if mention.id == bot.user.id:
@@ -455,7 +413,6 @@ def ping_afk_system():
         if not bot_mentioned:
             return
         
-        # Store ping data
         channel_id = str(message.channel.id)
         pings_data = load_pings()
         
@@ -471,48 +428,40 @@ def ping_afk_system():
         
         pings_data[channel_id].append(ping_entry)
         
-        # Keep only last 50 pings per channel
         if len(pings_data[channel_id]) > 50:
             pings_data[channel_id] = pings_data[channel_id][-50:]
         
         save_pings(pings_data)
         print(f"Ping tracked from {message.author} in {message.channel}", type_="INFO")
         
-        # Handle AFK response
         afk_enabled = getConfigData().get(f"{CONFIG_PREFIX}afk_enabled", False)
         if not afk_enabled:
             return
         
-        # Check server setting
         if message.guild:
             afk_server = getConfigData().get(f"{CONFIG_PREFIX}afk_server", True)
             if not afk_server:
                 return
         
-        # Check reply setting
         afk_reply = getConfigData().get(f"{CONFIG_PREFIX}afk_reply", True)
         if not afk_reply:
             return
         
-        # Check cooldown
         user_id = str(message.author.id)
         if is_on_cooldown(user_id):
             print(f"User {message.author} on cooldown, skipping AFK response", type_="INFO")
             return
         
-        # Apply delay
         delay = getConfigData().get(f"{CONFIG_PREFIX}afk_delay", 0)
         if delay > 0:
             await asyncio.sleep(delay)
         
-        # Show typing indicator
         typing_enabled = getConfigData().get(f"{CONFIG_PREFIX}afk_typing", True)
         if typing_enabled:
             typing_length = getConfigData().get(f"{CONFIG_PREFIX}afk_typing_length", 2)
             async with message.channel.typing():
                 await asyncio.sleep(typing_length)
         
-        # Send AFK message
         afk_message = getConfigData().get(f"{CONFIG_PREFIX}afk_message", "I'm currently AFK")
         try:
             await message.reply(f"> {afk_message}", mention_author=False)
@@ -524,27 +473,22 @@ def ping_afk_system():
     # Event listener: Disable AFK on user message
     @bot.listen("on_message")
     async def afk_auto_disable(message):
-        # Check if message is from the bot user
         if message.author.id != bot.user.id:
             return
         
-        # Check if AFK is enabled
         afk_enabled = getConfigData().get(f"{CONFIG_PREFIX}afk_enabled", False)
         if not afk_enabled:
             return
         
-        # Ignore if message is a command (starts with prefix)
         prefix = getConfigData().get("prefix", ".")
         if message.content.startswith(prefix):
             return
         
-        # Ignore if message starts with ">" (our status messages)
         if message.content.startswith(">"):
             return
         
-        # Disable AFK
         updateConfigData(f"{CONFIG_PREFIX}afk_enabled", False)
-        save_cooldowns({})  # Clear cooldowns
+        save_cooldowns({})
         print("AFK auto-disabled due to user activity", type_="INFO")
         
         try:
