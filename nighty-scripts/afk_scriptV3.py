@@ -412,7 +412,6 @@ def ping_afk_system():
 > **{prefix}pings** - Display the most recent pings in this channel
 > Shows the last 10 pings with timestamps, usernames, and jump links
 
-
 ## Current Settings
 
 > **AFK Status:** {'Enabled' if afk_enabled else 'Disabled'}
@@ -450,13 +449,17 @@ def ping_afk_system():
         if message.author.id == bot.user.id or message.author.bot:
             return
         
+        # Check if it's a DM (not a group DM, just a regular DM)
+        is_dm = message.guild is None and len(message.channel.recipients) == 2
+        
         bot_mentioned = False
         for mention in message.mentions:
             if mention.id == bot.user.id:
                 bot_mentioned = True
                 break
         
-        if not bot_mentioned:
+        # In DMs, we don't need a mention. In servers/group chats, we do.
+        if not is_dm and not bot_mentioned:
             return
         
         channel_id = str(message.channel.id)
