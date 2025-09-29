@@ -64,6 +64,15 @@ def script_function():
             await ctx.send("> Invalid user mention or ID format.", delete_after=5)
             return
         
+        # Check if already blocked to prevent errors
+        try:
+            async for relationship in bot.user.relationships:
+                if str(relationship.user.id) == user_id and relationship.type.name == "blocked":
+                    await ctx.send(f"> User `{user_id}` is already blocked.", delete_after=5)
+                    return
+        except Exception as e:
+            print(f"Error checking block status: {e}", type_="ERROR")
+        
         try:
             # Attempt to fetch the user
             user = await bot.fetch_user(int(user_id))
@@ -203,14 +212,14 @@ def script_function():
             blocked_users = []
             async for relationship in bot.user.relationships:
                 if relationship.type.name == "blocked":
-                    blocked_users.append(f"• **{relationship.user.name}** (`{relationship.user.id}`)")
+                    blocked_users.append(f"> • **{relationship.user.name}** (`{relationship.user.id}`)")
             
             if not blocked_users:
                 await ctx.send("> Your block list is empty.", delete_after=5)
                 return
             
             blocklist_text = "\n".join(blocked_users)
-            await ctx.send(f"> Blocked Users ({len(blocked_users)}):\n{blocklist_text}", delete_after=15)
+            await ctx.send(f"> **Blocked Users ({len(blocked_users)}):**\n{blocklist_text}", delete_after=15)
             
         except Exception as e:
             await ctx.send(f"> Failed to retrieve block list: {str(e)}", delete_after=5)
@@ -235,12 +244,12 @@ def script_function():
         for user_id in ignored_users:
             try:
                 user = await bot.fetch_user(int(user_id))
-                ignore_display.append(f"• **{user.name}** (`{user_id}`)")
+                ignore_display.append(f"> • **{user.name}** (`{user_id}`)")
             except:
-                ignore_display.append(f"• Unknown User (`{user_id}`)")
+                ignore_display.append(f"> • Unknown User (`{user_id}`)")
         
         ignorelist_text = "\n".join(ignore_display)
-        await ctx.send(f"> Ignored Users ({len(ignored_users)}):\n{ignorelist_text}", delete_after=15)
+        await ctx.send(f"> **Ignored Users ({len(ignored_users)}):**\n{ignorelist_text}", delete_after=15)
     
     @bot.command(
         name="blockhelp",
@@ -253,18 +262,18 @@ def script_function():
         prefix = getConfigData().get('prefix', '.')
         
         help_text = f"""
-        
-## BLOCK COMMANDS:
+
+> **BLOCK COMMANDS:**
 > `{prefix}block <@user or user_id>` - Block a user using Discord API
 > `{prefix}unblock <@user or user_id>` - Unblock a previously blocked user
 > `{prefix}blocklist` - View all blocked users
 
-## IGNORE COMMANDS:
+> **IGNORE COMMANDS:**
 > `{prefix}ignore <@user or user_id>` - Ignore user's messages (local filter)
 > `{prefix}unignore <@user or user_id>` - Remove user from ignore list
 > `{prefix}ignorelist` - View all ignored users
 
-## ALIASES:
+> **ALIASES:**
 > Block: `{prefix}b` | Unblock: `{prefix}ub`
 > Ignore: `{prefix}ig` | Unignore: `{prefix}uig`
 > Blocklist: `{prefix}bl` | Ignorelist: `{prefix}il`"""
