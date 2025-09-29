@@ -32,18 +32,19 @@ def script_function():
     - Secure random number generation
 
     NOTES:
-    - Requires 'cryptography' package (built into Python 3.6+)
+    - Requires 'pycryptodome' package (standard Python crypto library)
     - All keys are generated using cryptographically secure random sources
     - Encrypted data includes integrity verification
     - Private keys are stored securely in local configuration
     """
     
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.primitives import hashes, serialization, padding as sym_padding
-    from cryptography.hazmat.primitives.asymmetric import rsa, padding as asym_padding
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    from cryptography.hazmat.backends import default_backend
+    from Crypto.Cipher import AES
+    from Crypto.Random import get_random_bytes
+    from Crypto.Protocol.KDF import PBKDF2
+    from Crypto.Hash import SHA256, HMAC
+    from Crypto.Util.Padding import pad, unpad
+    from Crypto.PublicKey import RSA
+    from Crypto.Cipher import PKCS1_OAEP
     import os
     import base64
     import json
@@ -123,107 +124,73 @@ def script_function():
     
     def generate_secure_key(size_bits=256):
         """Generate a cryptographically secure random key."""
-        return os.urandom(size_bits // 8)
+        return get_random_bytes(size_bits // 8)
     
     def derive_key_from_password(password: str, salt: bytes = None, iterations: int = 100000):
         """Derive encryption key from password using PBKDF2."""
         if salt is None:
-            salt = os.urandom(32)
+            salt = get_random_bytes(32)
         
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=iterations,
-            backend=default_backend()
-        )
-        
-        key = kdf.derive(password.encode())
+        key = PBKDF2(password, salt, 32, count=iterations, hmac_hash_module=SHA256)
         return key, salt
     
     def generate_rsa_keypair(key_size=2048):
         """Generate RSA key pair for secure key exchange."""
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=key_size,
-            backend=default_backend()
-        )
+        private_key = RSA.generate(key_size)
+        public_key = private_key.publickey()
         
-        public_key = private_key.public_key()
+        # Export keys in PEM format
+        private_pem = private_key.export_key().decode()
+        public_pem = public_key.export_key().decode()
         
-        # Serialize keys
-        private_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
-        )
-        
-        public_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        
-        return private_pem.decode(), public_pem.decode()
+        return private_pem, public_pem
     
     def encrypt_aes_gcm(plaintext: bytes, key: bytes):
         """Encrypt using AES-GCM (authenticated encryption)."""
-        aesgcm = AESGCM(key)
-        nonce = os.urandom(12)  # GCM standard nonce size
-        ciphertext = aesgcm.encrypt(nonce, plaintext, None)
-        return nonce + ciphertext
+        cipher = AES.new(key, AES.MODE_GCM)
+        ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+        return cipher.nonce + tag + ciphertext
     
     def decrypt_aes_gcm(ciphertext_with_nonce: bytes, key: bytes):
         """Decrypt using AES-GCM."""
-        nonce = ciphertext_with_nonce[:12]
-        ciphertext = ciphertext_with_nonce[12:]
-        aesgcm = AESGCM(key)
-        return aesgcm.decrypt(nonce, ciphertext, None)
+        nonce = ciphertext_with_nonce[:16]
+        tag = ciphertext_with_nonce[16:32]
+        ciphertext = ciphertext_with_nonce[32:]
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        return cipher.decrypt_and_verify(ciphertext, tag)
     
     def encrypt_aes_cbc(plaintext: bytes, key: bytes):
         """Encrypt using AES-CBC with PKCS7 padding."""
-        iv = os.urandom(16)
-        padder = sym_padding.PKCS7(128).padder()
-        padded_data = padder.update(plaintext) + padder.finalize()
-        
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(padded_data) + encryptor.finalize()
-        
-        return iv + ciphertext
+        cipher = AES.new(key, AES.MODE_CBC)
+        padded_data = pad(plaintext, AES.block_size)
+        ciphertext = cipher.encrypt(padded_data)
+        return cipher.iv + ciphertext
     
     def decrypt_aes_cbc(ciphertext_with_iv: bytes, key: bytes):
         """Decrypt using AES-CBC and remove PKCS7 padding."""
         iv = ciphertext_with_iv[:16]
         ciphertext = ciphertext_with_iv[16:]
-        
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-        decryptor = cipher.decryptor()
-        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-        
-        unpadder = sym_padding.PKCS7(128).unpadder()
-        plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
-        
-        return plaintext
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        padded_plaintext = cipher.decrypt(ciphertext)
+        return unpad(padded_plaintext, AES.block_size)
     
     def encrypt_aes_ctr(plaintext: bytes, key: bytes):
         """Encrypt using AES-CTR mode."""
-        nonce = os.urandom(16)
-        cipher = Cipher(algorithms.AES(key), modes.CTR(nonce), backend=default_backend())
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(plaintext) + encryptor.finalize()
-        return nonce + ciphertext
+        cipher = AES.new(key, AES.MODE_CTR)
+        ciphertext = cipher.encrypt(plaintext)
+        return cipher.nonce + ciphertext
     
     def decrypt_aes_ctr(ciphertext_with_nonce: bytes, key: bytes):
         """Decrypt using AES-CTR mode."""
-        nonce = ciphertext_with_nonce[:16]
-        ciphertext = ciphertext_with_nonce[16:]
-        cipher = Cipher(algorithms.AES(key), modes.CTR(nonce), backend=default_backend())
-        decryptor = cipher.decryptor()
-        return decryptor.update(ciphertext) + decryptor.finalize()
+        nonce = ciphertext_with_nonce[:8]
+        ciphertext = ciphertext_with_nonce[8:]
+        cipher = AES.new(key, AES.MODE_CTR, nonce=nonce)
+        return cipher.decrypt(ciphertext)
     
     def add_hmac_protection(data: bytes, key: bytes):
         """Add HMAC authentication to encrypted data."""
-        h = hmac.new(key, data, hashlib.sha256)
+        h = HMAC.new(key, digestmod=SHA256)
+        h.update(data)
         return data + h.digest()
     
     def verify_hmac_protection(data_with_hmac: bytes, key: bytes):
@@ -231,9 +198,11 @@ def script_function():
         data = data_with_hmac[:-32]  # HMAC-SHA256 is 32 bytes
         received_hmac = data_with_hmac[-32:]
         
-        expected_hmac = hmac.new(key, data, hashlib.sha256).digest()
+        h = HMAC.new(key, digestmod=SHA256)
+        h.update(data)
+        expected_hmac = h.digest()
         
-        if not hmac.compare_digest(received_hmac, expected_hmac):
+        if received_hmac != expected_hmac:
             raise ValueError("HMAC verification failed - data may be tampered")
         
         return data
@@ -270,7 +239,7 @@ def script_function():
         
         # Step 4: Add HMAC protection if enabled
         if config["enable_hmac"]:
-            hmac_key = hashlib.sha256(encryption_key + b"hmac_salt").digest()
+            hmac_key = SHA256.new(encryption_key + b"hmac_salt").digest()
             encrypted_data = add_hmac_protection(encrypted_data, hmac_key)
         
         # Step 5: Create data package
@@ -316,7 +285,7 @@ def script_function():
             
             # Remove HMAC protection if present
             if package.get("has_hmac", False):
-                hmac_key = hashlib.sha256(encryption_key + b"hmac_salt").digest()
+                hmac_key = SHA256.new(encryption_key + b"hmac_salt").digest()
                 encrypted_data = verify_hmac_protection(encrypted_data, hmac_key)
             
             # Decrypt with appropriate mode
