@@ -1,9 +1,3 @@
-@nightyScript(
-    name="Ping Tracker & AFK",
-    author="thedorekaczynski",
-    description="Track recent pings and manage AFK status with auto-responses",
-    usage="<p>pings | <p>afk | <p>afkm <message> | <p>afkd <seconds> | <p>afkt <true/false> | <p>afktl <seconds> | <p>afkr <true/false> | <p>afks <true/false> | <p>afkc <seconds>"
-)
 def ping_afk_system():
     """
     PING TRACKER & AFK SYSTEM
