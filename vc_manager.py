@@ -218,9 +218,9 @@ def voice_manager_script():
 > `{prefix}voicehelp` - Show this help menu
 > 
 > **Current Status:**
-> Connected to: {current_channel}
-> Self-mute: {mute_status}
-> Self-deafen: {deaf_status}
+> Connected to: {current_channel}.
+> Self-mute: {mute_status}.
+> Self-deafen: {deaf_status}.
 > 
 > **Note:** Get channel IDs by right-clicking voice channels and selecting "Copy ID\""""
 
