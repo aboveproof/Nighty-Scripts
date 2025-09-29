@@ -1,4 +1,4 @@
-def ping_afk_system():    
+def ping_afk_system():
     CONFIG_PREFIX = "ping_afk_"
     
     # Initialize default configuration
@@ -405,12 +405,13 @@ def ping_afk_system():
         afk_server = getConfigData().get(f"{CONFIG_PREFIX}afk_server", True)
         afk_cooldown = getConfigData().get(f"{CONFIG_PREFIX}afk_cooldown", 60)
         
-        help_content = f"""# Ping Tracker & AFK System
+        help_content = f"""
 
 ## Ping Commands
 
 > **{prefix}pings** - Display the most recent pings in this channel
 > Shows the last 10 pings with timestamps, usernames, and jump links
+
 
 ## Current Settings
 
