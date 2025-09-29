@@ -186,7 +186,5 @@ def nighty_help_script():
         await ctx.send(help_text)
         print("Help command executed", type_="INFO")
 
-    print("Nighty Help Commands script initialized successfully", type_="SUCCESS")
-
 # Initialize the script
 nighty_help_script()
