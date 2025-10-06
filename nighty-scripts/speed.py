@@ -1,43 +1,3 @@
-"""
-NightyScript Speed Test
------------------------
-
-A comprehensive network speed test script for Nighty that measures download speed,
-upload speed, ping, and jitter using multiple test servers.
-
-COMMANDS:
-<p>speedtest - Run a full speed test (download, upload, ping)
-<p>speedtest quick - Run a quick speed test (download and ping only)
-<p>speedtest server - Show current test server information
-<p>speedtest config - Configure speed test settings
-<p>speedtest history - View recent speed test results
-
-EXAMPLES:
-<p>speedtest              - Full speed test
-<p>speedtest quick        - Quick test (faster)
-<p>speedtest config size 50  - Set download test size to 50MB
-
-NOTES:
-- Uses multiple concurrent connections for accurate results
-- Tests against reliable public test servers
-- Stores test history in JSON for tracking over time
-- All tests run asynchronously to avoid blocking the bot
-- Results are formatted with appropriate units (Mbps, ms)
-
-DEPENDENCIES:
-- aiohttp (built-in)
-- asyncio (built-in)
-- json (built-in)
-- time (built-in)
-"""
-
-import aiohttp
-import asyncio
-import json
-import time
-from datetime import datetime
-from pathlib import Path
-
 def speedtest_script():
     """
     Main script function - initializes commands and configuration.
@@ -59,10 +19,10 @@ def speedtest_script():
     
     # Initialize config with defaults
     config_defaults = {
-        "speedtest_download_size_mb": 25,  # MB to download for speed test
-        "speedtest_upload_size_mb": 10,    # MB to upload for speed test
-        "speedtest_connections": 4,         # Concurrent connections
-        "speedtest_timeout": 30,            # Timeout in seconds
+        "speedtest_download_size_mb": 10,  # MB to download for speed test
+        "speedtest_upload_size_mb": 5,     # MB to upload for speed test
+        "speedtest_connections": 3,         # Concurrent connections
+        "speedtest_timeout": 15,            # Timeout in seconds
         "speedtest_history_limit": 20       # Max stored results
     }
     
@@ -74,22 +34,19 @@ def speedtest_script():
     # TEST SERVERS
     # ============================================================================
     
-    # Public test servers for speed testing
+    # Public test files for speed testing (large, publicly accessible files)
     TEST_SERVERS = [
         {
-            "name": "Cloudflare",
-            "url": "https://speed.cloudflare.com/__down",
-            "ping_url": "https://1.1.1.1"
-        },
-        {
-            "name": "Google",
-            "url": "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png",
-            "ping_url": "https://www.google.com"
-        },
-        {
             "name": "GitHub",
-            "url": "https://github.com",
-            "ping_url": "https://github.com"
+            "download_url": "https://github.com/git/git/archive/refs/tags/v2.40.0.zip",
+            "ping_url": "https://api.github.com",
+            "upload_url": "https://httpbin.org/post"
+        },
+        {
+            "name": "Cloudflare",
+            "download_url": "https://speed.cloudflare.com/__down?bytes=10000000",
+            "ping_url": "https://1.1.1.1",
+            "upload_url": "https://httpbin.org/post"
         }
     ]
     
@@ -119,6 +76,8 @@ def speedtest_script():
     
     def format_speed(bytes_per_second):
         """Convert bytes/second to Mbps."""
+        if bytes_per_second <= 0:
+            return "0.00 Mbps"
         mbps = (bytes_per_second * 8) / (1024 * 1024)
         return f"{mbps:.2f} Mbps"
     
@@ -134,26 +93,30 @@ def speedtest_script():
     # SPEED TEST FUNCTIONS
     # ============================================================================
     
-    async def test_ping(server_url, count=5):
+    async def test_ping(server_url, count=4):
         """
         Measure ping (latency) to a server.
         Returns average ping in milliseconds and jitter.
         """
         pings = []
+        timeout_config = aiohttp.ClientTimeout(total=5)
         
         try:
-            async with aiohttp.ClientSession() as session:
-                for _ in range(count):
+            async with aiohttp.ClientSession(timeout=timeout_config) as session:
+                for i in range(count):
                     start = time.time()
                     try:
-                        async with session.head(server_url, timeout=5) as response:
-                            if response.status < 500:  # Accept any non-server-error
-                                elapsed = (time.time() - start) * 1000  # Convert to ms
-                                pings.append(elapsed)
-                    except:
-                        pass  # Skip failed pings
+                        async with session.get(server_url, allow_redirects=True) as response:
+                            # Just read a bit to ensure connection
+                            await response.read()
+                            elapsed = (time.time() - start) * 1000  # Convert to ms
+                            pings.append(elapsed)
+                            print(f"Ping {i+1}/{count}: {elapsed:.1f}ms", type_="INFO")
+                    except Exception as e:
+                        print(f"Ping attempt {i+1} failed: {e}", type_="ERROR")
                     
-                    await asyncio.sleep(0.1)  # Small delay between pings
+                    if i < count - 1:  # Don't sleep after last ping
+                        await asyncio.sleep(0.2)
         except Exception as e:
             print(f"Ping test error: {e}", type_="ERROR")
             return None, None
@@ -171,16 +134,32 @@ def speedtest_script():
         
         return avg_ping, jitter
     
-    async def download_chunk(session, url, chunk_size):
-        """Download a chunk of data and return bytes received."""
+    async def download_chunk(session, url, chunk_num, max_bytes):
+        """Download data and return bytes received."""
+        bytes_downloaded = 0
         try:
-            async with session.get(url, timeout=10) as response:
+            print(f"Starting download chunk {chunk_num}...", type_="INFO")
+            async with session.get(url, allow_redirects=True) as response:
                 if response.status == 200:
-                    data = await response.read()
-                    return len(data)
-        except:
-            pass
-        return 0
+                    # Read in chunks to track progress
+                    chunk_size = 8192
+                    while bytes_downloaded < max_bytes:
+                        chunk = await response.content.read(chunk_size)
+                        if not chunk:
+                            break
+                        bytes_downloaded += len(chunk)
+                        if bytes_downloaded >= max_bytes:
+                            break
+                    
+                    print(f"Chunk {chunk_num} downloaded {format_size(bytes_downloaded)}", type_="INFO")
+                else:
+                    print(f"Chunk {chunk_num} got status {response.status}", type_="ERROR")
+        except asyncio.TimeoutError:
+            print(f"Chunk {chunk_num} timed out after {format_size(bytes_downloaded)}", type_="ERROR")
+        except Exception as e:
+            print(f"Chunk {chunk_num} error: {e}", type_="ERROR")
+        
+        return bytes_downloaded
     
     async def test_download(server_url, size_mb, connections):
         """
@@ -190,39 +169,56 @@ def speedtest_script():
         total_size = size_mb * 1024 * 1024  # Convert MB to bytes
         chunk_size = total_size // connections
         
+        timeout_config = aiohttp.ClientTimeout(total=30, sock_read=15)
+        
         try:
-            async with aiohttp.ClientSession() as session:
+            print(f"Testing download with {connections} connections, {size_mb}MB total", type_="INFO")
+            
+            async with aiohttp.ClientSession(timeout=timeout_config) as session:
                 start_time = time.time()
                 
                 # Create concurrent download tasks
                 tasks = [
-                    download_chunk(session, server_url, chunk_size)
-                    for _ in range(connections)
+                    download_chunk(session, server_url, i+1, chunk_size)
+                    for i in range(connections)
                 ]
                 
-                results = await asyncio.gather(*tasks)
-                total_downloaded = sum(results)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Filter out exceptions and sum bytes
+                total_downloaded = sum(r for r in results if isinstance(r, int))
                 
                 elapsed = time.time() - start_time
                 
+                print(f"Downloaded {format_size(total_downloaded)} in {elapsed:.2f}s", type_="INFO")
+                
                 if elapsed > 0 and total_downloaded > 0:
-                    return total_downloaded / elapsed
+                    speed = total_downloaded / elapsed
+                    print(f"Download speed: {format_speed(speed)}", type_="SUCCESS")
+                    return speed
+                else:
+                    print("Download test produced no valid results", type_="ERROR")
+                    return 0
         except Exception as e:
             print(f"Download test error: {e}", type_="ERROR")
-        
-        return 0
+            return 0
     
-    async def upload_chunk(session, url, data_size):
+    async def upload_chunk(session, url, chunk_num, data_size):
         """Upload a chunk of data and return bytes sent."""
         try:
-            # Generate random data to upload
-            data = b'0' * data_size
+            # Generate data to upload
+            data = b'X' * data_size
             
-            async with session.post(url, data=data, timeout=10) as response:
+            print(f"Starting upload chunk {chunk_num}...", type_="INFO")
+            async with session.post(url, data=data) as response:
+                await response.read()  # Consume response
                 if response.status < 500:
+                    print(f"Chunk {chunk_num} uploaded {format_size(data_size)}", type_="INFO")
                     return data_size
-        except:
-            pass
+                else:
+                    print(f"Chunk {chunk_num} upload failed with status {response.status}", type_="ERROR")
+        except Exception as e:
+            print(f"Upload chunk {chunk_num} error: {e}", type_="ERROR")
         return 0
     
     async def test_upload(server_url, size_mb, connections):
@@ -233,26 +229,38 @@ def speedtest_script():
         total_size = size_mb * 1024 * 1024
         chunk_size = total_size // connections
         
+        timeout_config = aiohttp.ClientTimeout(total=30, sock_read=15)
+        
         try:
-            async with aiohttp.ClientSession() as session:
+            print(f"Testing upload with {connections} connections, {size_mb}MB total", type_="INFO")
+            
+            async with aiohttp.ClientSession(timeout=timeout_config) as session:
                 start_time = time.time()
                 
                 tasks = [
-                    upload_chunk(session, server_url, chunk_size)
-                    for _ in range(connections)
+                    upload_chunk(session, server_url, i+1, chunk_size)
+                    for i in range(connections)
                 ]
                 
-                results = await asyncio.gather(*tasks)
-                total_uploaded = sum(results)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Filter out exceptions and sum bytes
+                total_uploaded = sum(r for r in results if isinstance(r, int))
                 
                 elapsed = time.time() - start_time
                 
+                print(f"Uploaded {format_size(total_uploaded)} in {elapsed:.2f}s", type_="INFO")
+                
                 if elapsed > 0 and total_uploaded > 0:
-                    return total_uploaded / elapsed
+                    speed = total_uploaded / elapsed
+                    print(f"Upload speed: {format_speed(speed)}", type_="SUCCESS")
+                    return speed
+                else:
+                    print("Upload test produced no valid results", type_="ERROR")
+                    return 0
         except Exception as e:
             print(f"Upload test error: {e}", type_="ERROR")
-        
-        return 0
+            return 0
     
     async def run_full_speedtest(quick_mode=False):
         """
@@ -270,9 +278,9 @@ def speedtest_script():
         }
         
         # Get config values
-        download_size = getConfigData().get("speedtest_download_size_mb", 25)
-        upload_size = getConfigData().get("speedtest_upload_size_mb", 10)
-        connections = getConfigData().get("speedtest_connections", 4)
+        download_size = getConfigData().get("speedtest_download_size_mb", 10)
+        upload_size = getConfigData().get("speedtest_upload_size_mb", 5)
+        connections = getConfigData().get("speedtest_connections", 3)
         
         server = TEST_SERVERS[0]
         
@@ -284,13 +292,13 @@ def speedtest_script():
         
         # Test download
         print("Testing download speed...", type_="INFO")
-        download_speed = await test_download(server["url"], download_size, connections)
+        download_speed = await test_download(server["download_url"], download_size, connections)
         results["download"] = download_speed
         
         # Test upload (skip in quick mode)
         if not quick_mode:
             print("Testing upload speed...", type_="INFO")
-            upload_speed = await test_upload(server["url"], upload_size, connections)
+            upload_speed = await test_upload(server["upload_url"], upload_size, connections)
             results["upload"] = upload_speed
         
         return results
@@ -314,7 +322,7 @@ def speedtest_script():
         
         # Quick mode
         if subcommand == "quick":
-            msg = await ctx.send("🚀 Running quick speed test...")
+            msg = await ctx.send("🚀 Running quick speed test...", silent=True)
             
             try:
                 results = await run_full_speedtest(quick_mode=True)
@@ -357,6 +365,10 @@ def speedtest_script():
                         content=content,
                         title="⚡ Quick Speed Test"
                     )
+                except Exception as embed_error:
+                    print(f"Embed send error: {embed_error}", type_="ERROR")
+                    # Fallback to regular message
+                    await ctx.send(content)
                 finally:
                     updateConfigData("private", current_private)
                 
@@ -370,14 +382,15 @@ def speedtest_script():
             content = f"""# 🌐 Speed Test Server
 
 **Current Server:** {server['name']}
-**Test URL:** {server['url'][:50]}...
+**Download URL:** {server['download_url'][:60]}...
 **Ping URL:** {server['ping_url']}
+**Upload URL:** {server['upload_url']}
 
 **Configuration:**
-- Download Size: {getConfigData().get('speedtest_download_size_mb', 25)} MB
-- Upload Size: {getConfigData().get('speedtest_upload_size_mb', 10)} MB
-- Connections: {getConfigData().get('speedtest_connections', 4)}
-- Timeout: {getConfigData().get('speedtest_timeout', 30)}s
+- Download Size: {getConfigData().get('speedtest_download_size_mb', 10)} MB
+- Upload Size: {getConfigData().get('speedtest_upload_size_mb', 5)} MB
+- Connections: {getConfigData().get('speedtest_connections', 3)}
+- Timeout: {getConfigData().get('speedtest_timeout', 15)}s
 """
             
             current_private = getConfigData().get("private")
@@ -388,18 +401,20 @@ def speedtest_script():
                     channel_id=ctx.channel.id,
                     content=content
                 )
+            except:
+                await ctx.send(content)
             finally:
                 updateConfigData("private", current_private)
         
         # Configuration
         elif subcommand == "config":
             if not subargs:
-                await ctx.send("Usage: `<p>speedtest config <setting> <value>`\nSettings: size, upload, connections, timeout")
+                await ctx.send("Usage: `<p>speedtest config <setting> <value>`\nSettings: size, upload, connections, timeout", silent=True)
                 return
             
             config_parts = subargs.split(maxsplit=1)
             if len(config_parts) != 2:
-                await ctx.send("Invalid config format. Use: `<p>speedtest config <setting> <value>`")
+                await ctx.send("Invalid config format. Use: `<p>speedtest config <setting> <value>`", silent=True)
                 return
             
             setting, value = config_parts
@@ -409,45 +424,45 @@ def speedtest_script():
                 value = int(value)
                 
                 if setting in ["size", "download"]:
-                    if 1 <= value <= 100:
+                    if 1 <= value <= 50:
                         updateConfigData("speedtest_download_size_mb", value)
-                        await ctx.send(f"✅ Download test size set to {value} MB")
+                        await ctx.send(f"✅ Download test size set to {value} MB", silent=True)
                     else:
-                        await ctx.send("❌ Download size must be between 1 and 100 MB")
+                        await ctx.send("❌ Download size must be between 1 and 50 MB", silent=True)
                 
                 elif setting == "upload":
-                    if 1 <= value <= 50:
+                    if 1 <= value <= 25:
                         updateConfigData("speedtest_upload_size_mb", value)
-                        await ctx.send(f"✅ Upload test size set to {value} MB")
+                        await ctx.send(f"✅ Upload test size set to {value} MB", silent=True)
                     else:
-                        await ctx.send("❌ Upload size must be between 1 and 50 MB")
+                        await ctx.send("❌ Upload size must be between 1 and 25 MB", silent=True)
                 
                 elif setting in ["connections", "conn"]:
-                    if 1 <= value <= 10:
+                    if 1 <= value <= 5:
                         updateConfigData("speedtest_connections", value)
-                        await ctx.send(f"✅ Concurrent connections set to {value}")
+                        await ctx.send(f"✅ Concurrent connections set to {value}", silent=True)
                     else:
-                        await ctx.send("❌ Connections must be between 1 and 10")
+                        await ctx.send("❌ Connections must be between 1 and 5", silent=True)
                 
                 elif setting == "timeout":
-                    if 10 <= value <= 120:
+                    if 10 <= value <= 60:
                         updateConfigData("speedtest_timeout", value)
-                        await ctx.send(f"✅ Timeout set to {value} seconds")
+                        await ctx.send(f"✅ Timeout set to {value} seconds", silent=True)
                     else:
-                        await ctx.send("❌ Timeout must be between 10 and 120 seconds")
+                        await ctx.send("❌ Timeout must be between 10 and 60 seconds", silent=True)
                 
                 else:
-                    await ctx.send(f"❌ Unknown setting: {setting}")
+                    await ctx.send(f"❌ Unknown setting: {setting}", silent=True)
             
             except ValueError:
-                await ctx.send("❌ Value must be a number")
+                await ctx.send("❌ Value must be a number", silent=True)
         
         # History
         elif subcommand == "history":
             history = load_history()
             
             if not history:
-                await ctx.send("No speed test history available.")
+                await ctx.send("No speed test history available.", silent=True)
                 return
             
             # Show last 5 results
@@ -475,6 +490,8 @@ def speedtest_script():
                     channel_id=ctx.channel.id,
                     content=content
                 )
+            except:
+                await ctx.send(content)
             finally:
                 updateConfigData("private", current_private)
         
@@ -490,15 +507,15 @@ def speedtest_script():
 `{getConfigData().get('prefix', '<p>')}speedtest history` - View history
 
 **Config Settings:**
-- `size` or `download` - Download test size (1-100 MB)
-- `upload` - Upload test size (1-50 MB)
-- `connections` - Concurrent connections (1-10)
-- `timeout` - Request timeout (10-120 seconds)
+- `size` or `download` - Download test size (1-50 MB)
+- `upload` - Upload test size (1-25 MB)
+- `connections` - Concurrent connections (1-5)
+- `timeout` - Request timeout (10-60 seconds)
 
 **Examples:**
 `{getConfigData().get('prefix', '<p>')}speedtest`
 `{getConfigData().get('prefix', '<p>')}speedtest quick`
-`{getConfigData().get('prefix', '<p>')}speedtest config size 50`
+`{getConfigData().get('prefix', '<p>')}speedtest config size 10`
 """
             
             current_private = getConfigData().get("private")
@@ -509,12 +526,14 @@ def speedtest_script():
                     channel_id=ctx.channel.id,
                     content=help_text
                 )
+            except:
+                await ctx.send(help_text)
             finally:
                 updateConfigData("private", current_private)
         
         # Default: Full speed test
         else:
-            msg = await ctx.send("🚀 Running full speed test... This may take a minute.")
+            msg = await ctx.send("🚀 Running full speed test... This may take 30-60 seconds.", silent=True)
             
             try:
                 results = await run_full_speedtest(quick_mode=False)
@@ -575,6 +594,10 @@ def speedtest_script():
                         content=content,
                         title="⚡ Full Speed Test"
                     )
+                except Exception as embed_error:
+                    print(f"Embed send error: {embed_error}", type_="ERROR")
+                    # Fallback to regular message
+                    await ctx.send(content)
                 finally:
                     updateConfigData("private", current_private)
                 
@@ -584,4 +607,5 @@ def speedtest_script():
     
     print("Speed Test script loaded successfully!", type_="SUCCESS")
 
+# Initialize the script
 speedtest_script()
