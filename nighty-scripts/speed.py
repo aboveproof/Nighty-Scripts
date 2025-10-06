@@ -1,3 +1,10 @@
+import aiohttp
+import asyncio
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+
 def speedtest_script():
     """
     Main script function - initializes commands and configuration.
