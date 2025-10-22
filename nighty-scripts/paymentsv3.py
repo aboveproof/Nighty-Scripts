@@ -182,7 +182,7 @@ def paymentSettings():
     
     payment_card.create_ui_element(
         UI.Text, 
-        content=f"To send your payment methods, use the {bot.command_prefix}payment command.", 
+        content=f"To send your payment methods we have a couple commands, {bot.command_prefix}payment(s) | {bot.command_prefix}pay | {bot.command_prefix}p", 
         size="base", 
         weight="bold", 
         margin="mt-2"
@@ -350,7 +350,7 @@ def paymentSettings():
         variant="bordered"
     )
 
-    @bot.command(name="payment", aliases=["payments", "pay", "p"])
+    @bot.command(name="payment", aliases=["payment", "pay", "p"])
     async def payment(ctx):
         await ctx.message.delete()
         payment = {
