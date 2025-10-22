@@ -182,7 +182,7 @@ def paymentSettings():
     
     payment_card.create_ui_element(
         UI.Text, 
-        content=f"To send your payment methods, use the {bot.command_prefix}payments command.", 
+        content=f"To send your payment methods, use the {bot.command_prefix}payment command.", 
         size="base", 
         weight="bold", 
         margin="mt-2"
@@ -198,7 +198,7 @@ def paymentSettings():
 
     payment_card.create_ui_element(
         UI.Text, 
-        content="Traditional Payments",
+        content="Traditional Payment",
         size="lg", 
         weight="bold", 
         margin="mt-4"
@@ -266,7 +266,7 @@ def paymentSettings():
     # Crypto Payments Section
     payment_card.create_ui_element(
         UI.Text, 
-        content="Crypto Payments", 
+        content="Crypto Payment", 
         size="lg", 
         weight="bold", 
         margin="mt-6"
@@ -350,10 +350,10 @@ def paymentSettings():
         variant="bordered"
     )
 
-    @bot.command(name="payments", aliases=["payment", "pay", "p"])
-    async def payments(ctx):
+    @bot.command(name="payment", aliases=["payment", "pay", "p"])
+    async def payment(ctx):
         await ctx.message.delete()
-        payments = {
+        payment = {
             "PayPal": getSetting("paypal"),
             "CashApp": getSetting("cashapp"),
             "Venmo": getSetting("venmo"),
@@ -362,8 +362,8 @@ def paymentSettings():
             "Ethereum": getSetting("ethereum"),
             "Monero": getSetting("monero"),
         }
-        valid_payments = [f"> {name}: **{value}**" for name, value in payments.items() if value]
-        if valid_payments:
+        valid_payment = [f"> {name}: **{value}**" for name, value in payment.items() if value]
+        if valid_payment:
             instructions = (
                 "**Payment Instructions**\n\n"
                 "Ensure the transaction is completed successfully.\n"
@@ -375,7 +375,7 @@ def paymentSettings():
                 "- **All payments are non-refundable** in case of errors or incorrect transactions.\n"
                 "- Do **NOT** include any notes or memos with the transaction.\n\n"
                 "### Accepted Payment Methods ###\n"
-                + "\n".join(valid_payments)
+                + "\n".join(valid_payment)
             )
             await ctx.send(instructions)
         else:
