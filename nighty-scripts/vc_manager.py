@@ -1,6 +1,7 @@
 import json
 import asyncio
 from pathlib import Path
+from datetime import datetime
 
 def voice_manager_script():
     VOICE_MANAGER_PATH = Path(getScriptsPath()) / "json" / "voice_manager.json"
@@ -8,6 +9,7 @@ def voice_manager_script():
     DEFAULT_CONFIG = {}
     active_channel = None
     temp = {}
+    connection_start_time = None
 
     def delete_after():
         return getConfigData().get('deletetimer', 10)
@@ -30,6 +32,21 @@ def voice_manager_script():
             create_config_if_not_exist()
             return get_config()
     
+    def get_connection_duration():
+        if connection_start_time is None:
+            return "Not connected"
+        
+        duration = datetime.now() - connection_start_time
+        hours, remainder = divmod(int(duration.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        if hours > 0:
+            return f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            return f"{minutes}m {seconds}s"
+        else:
+            return f"{seconds}s"
+    
     async def check_if_connect_success(msg, delay, error_message):
         await asyncio.sleep(delay)
         if temp.get('from', None):
@@ -49,7 +66,7 @@ def voice_manager_script():
     
     @bot.listen("on_voice_state_update")
     async def on_voice_state_update(member, before, after):
-        nonlocal active_channel, temp
+        nonlocal active_channel, temp, connection_start_time
         if member.id != bot.user.id: 
             return
 
@@ -70,9 +87,11 @@ def voice_manager_script():
             
             if _from == 'command' and message is not None:
                 if _type == 'join':
+                    connection_start_time = datetime.now()
                     await message.edit(f'> Successfully connected to `{after.channel.name}`', delete_after=delete_after())
                     temp = {}
                 elif _type == 'leave':
+                    connection_start_time = None
                     channel_name = before.channel.name if before.channel else "voice channel"
                     await message.edit(f'> Successfully disconnected from `{channel_name}`', delete_after=delete_after())
                     temp = {}
@@ -132,6 +151,7 @@ def voice_manager_script():
         prefix = await bot.get_prefix(ctx.message)
         
         current_channel = f"`{active_channel.name}`" if active_channel else "None"
+        connection_duration = get_connection_duration()
         
         help_text = f"""> **Voice Manager Help**
 > 
@@ -142,8 +162,7 @@ def voice_manager_script():
 > 
 > **Current Status:**
 > Connected to: {current_channel}
-> 
-> **Note:** Get channel IDs by right-clicking voice channels and selecting "Copy ID\""""
+> Connected for: {connection_duration}"""
 
         await ctx.send(help_text, delete_after=delete_after())
 
