@@ -30,6 +30,9 @@ def vc_manager_farm_script():
     is_streaming = False
     is_camera_on = False
     
+    # UI references (will be set during UI creation)
+    ui_refs = {}
+    
     # ==================== DATA MANAGEMENT ====================
     def load_data():
         """Load VC data from JSON file"""
@@ -127,6 +130,132 @@ def vc_manager_farm_script():
         
         disconnect_task = asyncio.create_task(disconnect_timer())
     
+    # ==================== UI UPDATE FUNCTIONS ====================
+    def update_all_ui():
+        """Update all UI elements to reflect current state"""
+        try:
+            # Update connection status
+            if active_channel:
+                ui_refs['status_text'].content = "Status: 🟢 Connected"
+                ui_refs['status_text'].color = "#00FF00"
+                ui_refs['channel_name_text'].content = f"Channel: {active_channel.name}"
+                ui_refs['channel_id_text'].content = f"Channel ID: {active_channel.id}"
+                ui_refs['guild_name_text'].content = f"Server: {active_channel.guild.name if active_channel.guild else 'Unknown'}"
+                
+                session_duration = get_current_session_duration()
+                ui_refs['session_time_text'].content = f"Session Time: {format_duration(session_duration)}"
+                
+                # Enable voice controls
+                ui_refs['mute_toggle'].disabled = False
+                ui_refs['deafen_toggle'].disabled = False
+                ui_refs['stream_toggle'].disabled = False
+                ui_refs['camera_toggle'].disabled = False
+            else:
+                ui_refs['status_text'].content = "Status: 🔴 Disconnected"
+                ui_refs['status_text'].color = "#FF0000"
+                ui_refs['channel_name_text'].content = "Channel: None"
+                ui_refs['channel_id_text'].content = "Channel ID: None"
+                ui_refs['guild_name_text'].content = "Server: None"
+                ui_refs['session_time_text'].content = "Session Time: 0s"
+                
+                # Disable voice controls and reset to OFF
+                ui_refs['mute_toggle'].disabled = True
+                ui_refs['deafen_toggle'].disabled = True
+                ui_refs['stream_toggle'].disabled = True
+                ui_refs['camera_toggle'].disabled = True
+                ui_refs['mute_toggle'].checked = False
+                ui_refs['deafen_toggle'].checked = False
+                ui_refs['stream_toggle'].checked = False
+                ui_refs['camera_toggle'].checked = False
+                
+                # Reset dropdown selections
+                ui_refs['server_select'].selected_items = []
+                ui_refs['channel_select'].selected_items = []
+                ui_refs['channel_select'].visible = False
+                ui_refs['channel_id_input'].value = ""
+            
+            # Update voice state toggles when connected
+            if active_channel:
+                ui_refs['mute_toggle'].checked = is_muted
+                ui_refs['deafen_toggle'].checked = is_deafened
+                ui_refs['stream_toggle'].checked = is_streaming
+                ui_refs['camera_toggle'].checked = is_camera_on
+            
+            # Update total stats
+            data = load_data()
+            ui_refs['total_time_text'].content = f"Total VC Time: {format_duration(data['total_vc_time_seconds'])}"
+            ui_refs['session_count_text'].content = f"Total Sessions: {len(data['sessions'])}"
+            
+        except Exception as e:
+            print(f"Error updating UI: {e}", type_="ERROR")
+    
+    async def refresh_server_list():
+        """Refresh the server dropdown with current guilds"""
+        try:
+            servers_list = []
+            
+            for guild in bot.guilds:
+                try:
+                    icon_url = guild.icon.url if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
+                    servers_list.append({
+                        "id": str(guild.id),
+                        "title": guild.name,
+                        "iconUrl": icon_url
+                    })
+                except Exception as e:
+                    print(f"Error processing guild {guild.name}: {e}", type_="ERROR")
+            
+            if servers_list:
+                ui_refs['server_select'].items = servers_list
+                print(f"Loaded {len(servers_list)} servers", type_="INFO")
+            else:
+                ui_refs['server_select'].items = [{"id": "none", "title": "No servers available"}]
+            
+        except Exception as e:
+            print(f"Error refreshing server list: {e}", type_="ERROR")
+            ui_refs['server_select'].items = [{"id": "error", "title": "Error loading servers"}]
+    
+    async def refresh_channel_list(guild_id):
+        """Refresh the channel dropdown for selected guild"""
+        try:
+            if not guild_id or guild_id == "none":
+                ui_refs['channel_select'].items = [{"id": "none", "title": "Select a server first"}]
+                ui_refs['channel_select'].visible = False
+                return
+            
+            guild = bot.get_guild(int(guild_id))
+            if not guild:
+                ui_refs['channel_select'].items = [{"id": "none", "title": "Guild not found"}]
+                ui_refs['channel_select'].visible = False
+                return
+            
+            voice_channels = [ch for ch in guild.channels if hasattr(ch, 'user_limit')]
+            channel_items = []
+            
+            for channel in voice_channels:
+                try:
+                    member_count = len(channel.members) if hasattr(channel, 'members') else 0
+                    user_limit = channel.user_limit if channel.user_limit > 0 else "∞"
+                    
+                    channel_items.append({
+                        "id": str(channel.id),
+                        "title": f"{channel.name} ({member_count}/{user_limit})"
+                    })
+                except Exception as e:
+                    print(f"Error processing channel {channel.name}: {e}", type_="ERROR")
+            
+            if channel_items:
+                ui_refs['channel_select'].items = channel_items
+                ui_refs['channel_select'].visible = True
+            else:
+                ui_refs['channel_select'].items = [{"id": "none", "title": "No voice channels available"}]
+                ui_refs['channel_select'].visible = True
+            
+        except Exception as e:
+            print(f"Error refreshing channel list: {e}", type_="ERROR")
+            ui_refs['channel_select'].items = [{"id": "none", "title": "Error loading channels"}]
+            ui_refs['channel_select'].visible = False
+    
     # ==================== VOICE CONNECTION ====================
     async def connect(guild_id, channel_id):
         """Connect to voice channel"""
@@ -189,6 +318,9 @@ def vc_manager_farm_script():
         data["settings"]["deafened"] = is_deafened
         save_data(data)
         
+        # Update UI
+        update_all_ui()
+        
         return True
     
     async def check_if_connect_success(msg, delay, error_message):
@@ -200,7 +332,7 @@ def vc_manager_farm_script():
     # ==================== EVENT LISTENERS ====================
     @bot.listen("on_voice_state_update")
     async def on_voice_state_update(member, before, after):
-        nonlocal active_channel, temp, connection_start_time
+        nonlocal active_channel, temp, connection_start_time, stats_update_task
         
         if member.id != bot.user.id:
             return
@@ -225,16 +357,24 @@ def vc_manager_farm_script():
             _type = temp.get('type')
             _from = temp.get('from')
             
-            if _from == 'command' and message is not None:
-                if _type == 'join':
-                    connection_start_time = datetime.now()
-                    
-                    # Schedule auto-disconnect if configured
-                    data = load_data()
-                    auto_disconnect = data["settings"].get("auto_disconnect_minutes")
-                    if auto_disconnect:
-                        await schedule_disconnect(auto_disconnect)
-                    
+            if _type == 'join':
+                connection_start_time = datetime.now()
+                
+                # Schedule auto-disconnect if configured
+                data = load_data()
+                auto_disconnect = data["settings"].get("auto_disconnect_minutes")
+                if auto_disconnect:
+                    await schedule_disconnect(auto_disconnect)
+                
+                # Start live stats update
+                if stats_update_task:
+                    stats_update_task.cancel()
+                stats_update_task = asyncio.create_task(live_update_stats())
+                
+                # Update UI
+                update_all_ui()
+                
+                if _from == 'command' and message is not None:
                     # Disable private mode temporarily for embed
                     current_private = getConfigData().get("private")
                     updateConfigData("private", False)
@@ -249,16 +389,29 @@ def vc_manager_farm_script():
                         updateConfigData("private", current_private)
                     
                     await message.delete()
-                    temp = {}
-                    
-                elif _type == 'leave':
-                    connection_start_time = None
-                    channel_name = before.channel.name if before.channel else "voice channel"
-                    
-                    # Cancel disconnect timer
-                    if disconnect_task:
-                        disconnect_task.cancel()
-                    
+                
+                temp = {}
+                
+            elif _type == 'leave':
+                connection_start_time = None
+                channel_name = before.channel.name if before.channel else "voice channel"
+                
+                # Reset all voice states to OFF
+                is_muted = False
+                is_deafened = False
+                is_streaming = False
+                is_camera_on = False
+                
+                # Cancel disconnect timer and stats update
+                if disconnect_task:
+                    disconnect_task.cancel()
+                if stats_update_task:
+                    stats_update_task.cancel()
+                
+                # Update UI
+                update_all_ui()
+                
+                if _from == 'command' and message is not None:
                     # Disable private mode temporarily for embed
                     current_private = getConfigData().get("private")
                     updateConfigData("private", False)
@@ -273,8 +426,9 @@ def vc_manager_farm_script():
                         updateConfigData("private", current_private)
                     
                     await message.delete()
-                    temp = {}
-                    
+                
+                temp = {}
+                
         except Exception as e:
             print(f"Error in voice state update: {e}", type_="ERROR")
     
@@ -290,7 +444,7 @@ def vc_manager_farm_script():
             await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
-        global is_streaming
+        nonlocal is_streaming
         is_streaming = not is_streaming
         
         success = await update_voice_state(stream=is_streaming)
@@ -310,7 +464,7 @@ def vc_manager_farm_script():
             await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
-        global is_camera_on
+        nonlocal is_camera_on
         is_camera_on = not is_camera_on
         
         success = await update_voice_state(camera=is_camera_on)
@@ -492,25 +646,61 @@ def vc_manager_farm_script():
         await ctx.send(help_text, delete_after=delete_after())
     
     # ==================== UI TAB ====================
-    tab = Tab(name="VC Manager", icon="tube", gap=6)
+    tab = Tab(name="VC Manager Enhanced", icon="tube", gap=6)
     
     # Main container (columns layout)
     main_container = tab.create_container(type="columns", gap=6)
     
-    # Left column - Connection & Status
+    # Left column - Connection & Browser
     left_container = main_container.create_container(type="rows", width="auto", gap=6)
     
     # Connection Card
     connection_card = left_container.create_card(type="rows", gap=4)
     connection_card.create_ui_element(UI.Text, content="Voice Connection", size="xl", weight="bold")
     
-    channel_input = connection_card.create_ui_element(
+    # Connection mode toggle
+    connection_mode_group = connection_card.create_group(type="columns", gap=2)
+    connection_mode_group.create_ui_element(UI.Text, content="Connection Method:", size="sm", weight="medium")
+    
+    use_channel_id_toggle = connection_card.create_ui_element(
+        UI.Toggle,
+        label="Use Channel ID directly",
+        checked=False
+    )
+    ui_refs['use_channel_id_toggle'] = use_channel_id_toggle
+    
+    # Server selection dropdown
+    server_select = connection_card.create_ui_element(
+        UI.Select,
+        label="Select Server",
+        items=[{"id": "loading", "title": "Loading servers..."}],
+        mode="single",
+        full_width=True
+    )
+    ui_refs['server_select'] = server_select
+    
+    # Channel selection dropdown (hidden by default)
+    channel_select = connection_card.create_ui_element(
+        UI.Select,
+        label="Select Voice Channel",
+        items=[{"id": "none", "title": "Select a server first"}],
+        mode="single",
+        full_width=True,
+        visible=False
+    )
+    ui_refs['channel_select'] = channel_select
+    
+    # Channel ID input (hidden by default)
+    channel_id_input = connection_card.create_ui_element(
         UI.Input,
         label="Channel ID",
         placeholder="Enter voice channel ID...",
-        full_width=True
+        full_width=True,
+        visible=False
     )
+    ui_refs['channel_id_input'] = channel_id_input
     
+    # Connection buttons
     button_group = connection_card.create_group(type="columns", gap=2)
     join_button = button_group.create_ui_element(
         UI.Button,
@@ -524,6 +714,12 @@ def vc_manager_farm_script():
         variant="bordered",
         color="danger"
     )
+    refresh_list_button = button_group.create_ui_element(
+        UI.Button,
+        label="↻",
+        variant="ghost",
+        color="default"
+    )
     
     # Status Card
     status_card = left_container.create_card(type="rows", gap=3)
@@ -531,63 +727,125 @@ def vc_manager_farm_script():
     
     status_text = status_card.create_ui_element(
         UI.Text,
-        content="Status: Disconnected",
+        content="Status: 🔴 Disconnected",
         size="base",
+        color="#FF0000"
+    )
+    ui_refs['status_text'] = status_text
+    
+    guild_name_text = status_card.create_ui_element(
+        UI.Text,
+        content="Server: None",
+        size="sm",
         color="#888888"
     )
+    ui_refs['guild_name_text'] = guild_name_text
+    
     channel_name_text = status_card.create_ui_element(
         UI.Text,
         content="Channel: None",
         size="sm",
         color="#888888"
     )
+    ui_refs['channel_name_text'] = channel_name_text
+    
     channel_id_text = status_card.create_ui_element(
         UI.Text,
         content="Channel ID: None",
         size="sm",
         color="#888888"
     )
+    ui_refs['channel_id_text'] = channel_id_text
     
     # Right column - Settings & Stats
     right_container = main_container.create_container(type="rows", gap=6)
     
     # Voice Settings Card
-    settings_card = right_container.create_card(type="rows", gap=4)
-    settings_card.create_ui_element(UI.Text, content="Voice Settings", size="xl", weight="bold")
+    settings_card = right_container.create_card(type="rows", gap=2)
+    settings_card.create_ui_element(UI.Text, content="Voice Settings", size="lg", weight="bold")
+    settings_card.create_ui_element(UI.Text, content="(Available when connected)", size="sm", color="#888888")
     
-    mute_toggle = settings_card.create_ui_element(
+    # Create a compact group for toggles
+    settings_group = settings_card.create_group(type="rows", gap=2)
+    
+    mute_toggle = settings_group.create_ui_element(
         UI.Toggle,
         label="Mute Microphone",
-        checked=False
+        checked=False,
+        disabled=True
     )
-    deafen_toggle = settings_card.create_ui_element(
+    ui_refs['mute_toggle'] = mute_toggle
+    
+    deafen_toggle = settings_group.create_ui_element(
         UI.Toggle,
         label="Deafen Audio",
-        checked=False
+        checked=False,
+        disabled=True
     )
+    ui_refs['deafen_toggle'] = deafen_toggle
     
-    stream_toggle = settings_card.create_ui_element(
+    stream_toggle = settings_group.create_ui_element(
         UI.Toggle,
         label="Screen Share / Stream",
-        checked=False
+        checked=False,
+        disabled=True
     )
+    ui_refs['stream_toggle'] = stream_toggle
     
-    camera_toggle = settings_card.create_ui_element(
+    camera_toggle = settings_group.create_ui_element(
         UI.Toggle,
         label="Camera / Video",
-        checked=False
+        checked=False,
+        disabled=True
     )
+    ui_refs['camera_toggle'] = camera_toggle
     
-    timer_input = settings_card.create_ui_element(
-        UI.Input,
-        label="Auto-Disconnect Timer",
-        placeholder="Minutes (leave empty to disable)",
-        full_width=True,
-        margin="mt-4"
+    # Auto-Disconnect Timer Card
+    timer_card = right_container.create_card(type="rows", gap=3)
+    timer_card.create_ui_element(UI.Text, content="Auto-Disconnect Timer", size="lg", weight="bold")
+    
+    # Timer mode selection
+    timer_mode_select = timer_card.create_ui_element(
+        UI.Select,
+        label="Timer Mode",
+        items=[
+            {"id": "none", "title": "None (Never disconnect)"},
+            {"id": "minutes", "title": "Minutes"},
+            {"id": "hours", "title": "Hours"},
+            {"id": "days", "title": "Days"},
+            {"id": "custom", "title": "Custom (seconds)"}
+        ],
+        selected_items=["none"],
+        mode="single",
+        full_width=True
     )
-    timer_button = settings_card.create_ui_element(
+    ui_refs['timer_mode_select'] = timer_mode_select
+    
+    # Timer value selection (visible based on mode)
+    timer_value_select = timer_card.create_ui_element(
+        UI.Select,
+        label="Select Time",
+        items=[{"id": "1", "title": "1 minute"}],
+        mode="single",
+        full_width=True,
+        visible=False
+    )
+    ui_refs['timer_value_select'] = timer_value_select
+    
+    # Custom time input (for custom mode)
+    custom_time_input = timer_card.create_ui_element(
+        UI.Input,
+        label="Custom Time (seconds)",
+        placeholder="Enter seconds...",
+        full_width=True,
+        visible=False
+    )
+    ui_refs['custom_time_input'] = custom_time_input
+    
+    # Apply timer button
+    apply_timer_button = timer_card.create_ui_element(
         UI.Button,
-        label="Set Timer",
+        label="Apply Timer",
         variant="solid",
         color="primary",
         full_width=True
@@ -602,18 +860,23 @@ def vc_manager_farm_script():
         content="Session Time: 0s",
         size="base"
     )
+    ui_refs['session_time_text'] = session_time_text
+    
     total_time_text = stats_card.create_ui_element(
         UI.Text,
         content="Total VC Time: 0s",
         size="base"
     )
+    ui_refs['total_time_text'] = total_time_text
+    
     session_count_text = stats_card.create_ui_element(
         UI.Text,
         content="Total Sessions: 0",
         size="base"
     )
+    ui_refs['session_count_text'] = session_count_text
     
-    refresh_button = stats_card.create_ui_element(
+    refresh_stats_button = stats_card.create_ui_element(
         UI.Button,
         label="Refresh Stats",
         variant="ghost",
@@ -629,54 +892,77 @@ def vc_manager_farm_script():
                 await asyncio.sleep(1)  # Update every second
                 if active_channel:
                     session_duration = get_current_session_duration()
-                    session_time_text.content = f"Session Time: {format_duration(session_duration)}"
+                    ui_refs['session_time_text'].content = f"Session Time: {format_duration(session_duration)}"
                     
                     # Also update total time (includes current session)
                     data = load_data()
                     total_with_current = data["total_vc_time_seconds"] + session_duration
-                    total_time_text.content = f"Total VC Time: {format_duration(total_with_current)}"
+                    ui_refs['total_time_text'].content = f"Total VC Time: {format_duration(total_with_current)}"
             except Exception as e:
                 print(f"Error in live stats update: {e}", type_="ERROR")
                 break
     
-    def update_ui_status():
-        """Update UI with current status"""
-        if active_channel:
-            status_text.content = "Status: 🟢 Connected"
-            status_text.color = "#00FF00"
-            channel_name_text.content = f"Channel: {active_channel.name}"
-            channel_id_text.content = f"Channel ID: {active_channel.id}"
+    async def handle_connection_mode_toggle(checked):
+        """Handle toggle between server/channel selection and channel ID input"""
+        try:
+            if checked:
+                # Use channel ID mode
+                ui_refs['server_select'].visible = False
+                ui_refs['channel_select'].visible = False
+                ui_refs['channel_id_input'].visible = True
+            else:
+                # Use server/channel selection mode
+                ui_refs['server_select'].visible = True
+                ui_refs['channel_id_input'].visible = False
+                # Show channel select if server is selected
+                if ui_refs['server_select'].selected_items and ui_refs['server_select'].selected_items[0] not in ["loading", "none", "error"]:
+                    ui_refs['channel_select'].visible = True
+        except Exception as e:
+            print(f"Error handling connection mode toggle: {e}", type_="ERROR")
+    
+    async def handle_server_select(selected_items):
+        """Handle server selection from dropdown"""
+        try:
+            if not selected_items or selected_items[0] in ["loading", "none", "error"]:
+                ui_refs['channel_select'].visible = False
+                return
             
-            session_duration = get_current_session_duration()
-            session_time_text.content = f"Session Time: {format_duration(session_duration)}"
-        else:
-            status_text.content = "Status: 🔴 Disconnected"
-            status_text.color = "#FF0000"
-            channel_name_text.content = "Channel: None"
-            channel_id_text.content = "Channel ID: None"
-            session_time_text.content = "Session Time: 0s"
-        
-        # Update total stats
-        data = load_data()
-        total_time_text.content = f"Total VC Time: {format_duration(data['total_vc_time_seconds'])}"
-        session_count_text.content = f"Total Sessions: {len(data['sessions'])}"
+            guild_id = selected_items[0]
+            await refresh_channel_list(guild_id)
+            
+        except Exception as e:
+            print(f"Error handling server selection: {e}", type_="ERROR")
+            tab.toast("Error", "Failed to load channels", "ERROR")
     
     async def handle_join():
         """Handle join button click"""
         nonlocal active_channel, connection_start_time, temp, stats_update_task
         
-        channel_id = channel_input.value
-        if not channel_id or not channel_id.strip():
-            tab.toast("Error", "Please enter a channel ID", "ERROR")
-            return
+        # Check which mode we're in
+        use_id_mode = ui_refs['use_channel_id_toggle'].checked
+        
+        if use_id_mode:
+            # Use channel ID input
+            channel_id = ui_refs['channel_id_input'].value
+            if not channel_id or not channel_id.strip():
+                tab.toast("Error", "Please enter a channel ID", "ERROR")
+                return
+            channel_id = channel_id.strip()
+        else:
+            # Use dropdown selection
+            selected_channels = ui_refs['channel_select'].selected_items
+            if not selected_channels or selected_channels[0] == "none":
+                tab.toast("Error", "Please select a voice channel", "ERROR")
+                return
+            channel_id = selected_channels[0]
         
         join_button.loading = True
         
         try:
-            channel = await bot.fetch_channel(int(channel_id.strip()))
+            channel = await bot.fetch_channel(int(channel_id))
             
             if not isinstance(channel, discord.VoiceChannel):
-                tab.toast("Error", "Channel is not a voice channel", "ERROR")
+                tab.toast("Error", "Selected channel is not a voice channel", "ERROR")
                 join_button.loading = False
                 return
             
@@ -702,7 +988,7 @@ def vc_manager_farm_script():
                     stats_update_task.cancel()
                 stats_update_task = asyncio.create_task(live_update_stats())
                 
-                update_ui_status()
+                update_all_ui()
                 tab.toast("Success", f"Connected to {channel.name}", "SUCCESS")
             else:
                 tab.toast("Error", "Failed to connect to voice channel", "ERROR")
@@ -716,7 +1002,7 @@ def vc_manager_farm_script():
     
     async def handle_leave():
         """Handle leave button click"""
-        nonlocal active_channel, connection_start_time, temp, stats_update_task
+        nonlocal active_channel, connection_start_time, temp, stats_update_task, is_muted, is_deafened, is_streaming, is_camera_on
         
         if not active_channel:
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
@@ -739,13 +1025,19 @@ def vc_manager_farm_script():
             active_channel = None
             connection_start_time = None
             
+            # Reset all voice states to OFF
+            is_muted = False
+            is_deafened = False
+            is_streaming = False
+            is_camera_on = False
+            
             # Cancel disconnect timer and stats update
             if disconnect_task:
                 disconnect_task.cancel()
             if stats_update_task:
                 stats_update_task.cancel()
             
-            update_ui_status()
+            update_all_ui()
             tab.toast("Success", "Disconnected from voice channel", "SUCCESS")
             
         except Exception as e:
@@ -755,10 +1047,21 @@ def vc_manager_farm_script():
             leave_button.loading = False
             temp = {}
     
+    async def handle_refresh_list():
+        """Handle refresh button click"""
+        refresh_list_button.loading = True
+        try:
+            await refresh_server_list()
+            tab.toast("Success", "Server list refreshed", "SUCCESS")
+        except Exception as e:
+            tab.toast("Error", f"Failed to refresh: {str(e)}", "ERROR")
+        finally:
+            refresh_list_button.loading = False
+    
     async def handle_mute_toggle(checked):
         """Handle mute toggle"""
         if not active_channel:
-            mute_toggle.checked = not checked
+            ui_refs['mute_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
         
@@ -766,13 +1069,13 @@ def vc_manager_farm_script():
         if success:
             tab.toast("Success", f"{'Muted' if checked else 'Unmuted'} microphone", "SUCCESS")
         else:
-            mute_toggle.checked = not checked
+            ui_refs['mute_toggle'].checked = not checked
             tab.toast("Error", "Failed to update mute state", "ERROR")
     
     async def handle_deafen_toggle(checked):
         """Handle deafen toggle"""
         if not active_channel:
-            deafen_toggle.checked = not checked
+            ui_refs['deafen_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
         
@@ -780,13 +1083,13 @@ def vc_manager_farm_script():
         if success:
             tab.toast("Success", f"{'Deafened' if checked else 'Undeafened'} audio", "SUCCESS")
         else:
-            deafen_toggle.checked = not checked
+            ui_refs['deafen_toggle'].checked = not checked
             tab.toast("Error", "Failed to update deafen state", "ERROR")
     
     async def handle_stream_toggle(checked):
         """Handle stream toggle"""
         if not active_channel:
-            stream_toggle.checked = not checked
+            ui_refs['stream_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
         
@@ -794,13 +1097,13 @@ def vc_manager_farm_script():
         if success:
             tab.toast("Success", f"{'Started' if checked else 'Stopped'} screen share", "SUCCESS")
         else:
-            stream_toggle.checked = not checked
+            ui_refs['stream_toggle'].checked = not checked
             tab.toast("Error", "Failed to toggle stream", "ERROR")
     
     async def handle_camera_toggle(checked):
         """Handle camera toggle"""
         if not active_channel:
-            camera_toggle.checked = not checked
+            ui_refs['camera_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
         
@@ -808,18 +1111,89 @@ def vc_manager_farm_script():
         if success:
             tab.toast("Success", f"Camera {'enabled' if checked else 'disabled'}", "SUCCESS")
         else:
-            camera_toggle.checked = not checked
+            ui_refs['camera_toggle'].checked = not checked
             tab.toast("Error", "Failed to toggle camera", "ERROR")
     
-    async def handle_set_timer():
-        """Handle timer set button"""
-        timer_value = timer_input.value
-        
-        timer_button.loading = True
+    async def handle_timer_mode_change(selected_items):
+        """Handle timer mode selection"""
+        try:
+            if not selected_items:
+                return
+            
+            mode = selected_items[0]
+            
+            # Hide all timer inputs first
+            ui_refs['timer_value_select'].visible = False
+            ui_refs['custom_time_input'].visible = False
+            
+            if mode == "none":
+                # No timer - disable auto-disconnect
+                pass
+            elif mode == "minutes":
+                # Show minute options
+                ui_refs['timer_value_select'].label = "Select Minutes"
+                ui_refs['timer_value_select'].items = [
+                    {"id": "1", "title": "1 minute"},
+                    {"id": "5", "title": "5 minutes"},
+                    {"id": "10", "title": "10 minutes"},
+                    {"id": "15", "title": "15 minutes"},
+                    {"id": "20", "title": "20 minutes"},
+                    {"id": "25", "title": "25 minutes"},
+                    {"id": "30", "title": "30 minutes"},
+                    {"id": "45", "title": "45 minutes"},
+                    {"id": "60", "title": "60 minutes"}
+                ]
+                ui_refs['timer_value_select'].visible = True
+            elif mode == "hours":
+                # Show hour options
+                ui_refs['timer_value_select'].label = "Select Hours"
+                ui_refs['timer_value_select'].items = [
+                    {"id": "60", "title": "1 hour"},
+                    {"id": "120", "title": "2 hours"},
+                    {"id": "180", "title": "3 hours"},
+                    {"id": "240", "title": "4 hours"},
+                    {"id": "300", "title": "5 hours"},
+                    {"id": "360", "title": "6 hours"},
+                    {"id": "480", "title": "8 hours"},
+                    {"id": "720", "title": "12 hours"}
+                ]
+                ui_refs['timer_value_select'].visible = True
+            elif mode == "days":
+                # Show day options
+                ui_refs['timer_value_select'].label = "Select Days"
+                ui_refs['timer_value_select'].items = [
+                    {"id": "1440", "title": "1 day"},
+                    {"id": "2880", "title": "2 days"},
+                    {"id": "4320", "title": "3 days"},
+                    {"id": "5760", "title": "4 days"},
+                    {"id": "7200", "title": "5 days"},
+                    {"id": "8640", "title": "6 days"},
+                    {"id": "10080", "title": "7 days"}
+                ]
+                ui_refs['timer_value_select'].visible = True
+            elif mode == "custom":
+                # Show custom input
+                ui_refs['custom_time_input'].visible = True
+            
+        except Exception as e:
+            print(f"Error handling timer mode change: {e}", type_="ERROR")
+            tab.toast("Error", "Failed to update timer options", "ERROR")
+    
+    async def handle_apply_timer():
+        """Handle apply timer button"""
+        apply_timer_button.loading = True
         
         try:
-            if not timer_value or not timer_value.strip():
-                # Clear timer
+            selected_mode = ui_refs['timer_mode_select'].selected_items
+            if not selected_mode:
+                tab.toast("Error", "Please select a timer mode", "ERROR")
+                apply_timer_button.loading = False
+                return
+            
+            mode = selected_mode[0]
+            
+            if mode == "none":
+                # Disable timer
                 data = load_data()
                 data["settings"]["auto_disconnect_minutes"] = None
                 save_data(data)
@@ -827,13 +1201,48 @@ def vc_manager_farm_script():
                 if disconnect_task:
                     disconnect_task.cancel()
                 
-                tab.toast("Success", "Auto-disconnect timer disabled", "SUCCESS")
-            else:
-                minutes = int(timer_value.strip())
-                if minutes <= 0:
-                    tab.toast("Error", "Timer must be greater than 0", "ERROR")
-                    timer_button.loading = False
+                tab.toast("Success", "Auto-disconnect disabled", "SUCCESS")
+            
+            elif mode == "custom":
+                # Get custom seconds
+                custom_value = ui_refs['custom_time_input'].value
+                if not custom_value or not custom_value.strip():
+                    tab.toast("Error", "Please enter a time in seconds", "ERROR")
+                    apply_timer_button.loading = False
                     return
+                
+                try:
+                    seconds = int(custom_value.strip())
+                    if seconds <= 0:
+                        tab.toast("Error", "Time must be greater than 0", "ERROR")
+                        apply_timer_button.loading = False
+                        return
+                    
+                    minutes = seconds / 60
+                    
+                    # Save timer setting
+                    data = load_data()
+                    data["settings"]["auto_disconnect_minutes"] = minutes
+                    save_data(data)
+                    
+                    # Schedule if currently connected
+                    if active_channel:
+                        await schedule_disconnect(minutes)
+                    
+                    tab.toast("Success", f"Auto-disconnect set to {seconds} seconds", "SUCCESS")
+                
+                except ValueError:
+                    tab.toast("Error", "Invalid number format", "ERROR")
+            
+            else:
+                # Get value from dropdown
+                selected_value = ui_refs['timer_value_select'].selected_items
+                if not selected_value:
+                    tab.toast("Error", "Please select a time value", "ERROR")
+                    apply_timer_button.loading = False
+                    return
+                
+                minutes = float(selected_value[0])
                 
                 # Save timer setting
                 data = load_data()
@@ -844,38 +1253,88 @@ def vc_manager_farm_script():
                 if active_channel:
                     await schedule_disconnect(minutes)
                 
-                tab.toast("Success", f"Auto-disconnect set to {minutes} minutes", "SUCCESS")
-        except ValueError:
-            tab.toast("Error", "Invalid number format", "ERROR")
+                # Format display message
+                if minutes < 60:
+                    time_str = f"{int(minutes)} minute{'s' if minutes != 1 else ''}"
+                elif minutes < 1440:
+                    hours = int(minutes / 60)
+                    time_str = f"{hours} hour{'s' if hours != 1 else ''}"
+                else:
+                    days = int(minutes / 1440)
+                    time_str = f"{days} day{'s' if days != 1 else ''}"
+                
+                tab.toast("Success", f"Auto-disconnect set to {time_str}", "SUCCESS")
+        
         except Exception as e:
             tab.toast("Error", f"Failed to set timer: {str(e)}", "ERROR")
+            print(f"Error setting timer: {e}", type_="ERROR")
         finally:
-            timer_button.loading = False
+            apply_timer_button.loading = False
     
-    def handle_refresh():
+    def handle_refresh_stats():
         """Handle refresh stats button"""
-        update_ui_status()
+        update_all_ui()
         tab.toast("Success", "Statistics refreshed", "SUCCESS")
     
     # Assign event handlers
+    use_channel_id_toggle.onChange = handle_connection_mode_toggle
+    server_select.onChange = handle_server_select
     join_button.onClick = handle_join
     leave_button.onClick = handle_leave
+    refresh_list_button.onClick = handle_refresh_list
     mute_toggle.onChange = handle_mute_toggle
     deafen_toggle.onChange = handle_deafen_toggle
     stream_toggle.onChange = handle_stream_toggle
     camera_toggle.onChange = handle_camera_toggle
-    timer_button.onClick = handle_set_timer
-    refresh_button.onClick = handle_refresh
+    timer_mode_select.onChange = handle_timer_mode_change
+    apply_timer_button.onClick = handle_apply_timer
+    refresh_stats_button.onClick = handle_refresh_stats
     
-    # Initialize UI with current state
-    update_ui_status()
+    # Initialize UI with current state (sync function)
+    def initialize_ui_sync():
+        """Initialize UI with current data synchronously"""
+        try:
+            # Update all UI elements with current state
+            update_all_ui()
+            
+            print("VC Manager Enhanced UI initialized successfully", type_="SUCCESS")
+        except Exception as e:
+            print(f"Error initializing UI: {e}", type_="ERROR")
     
-    # Load saved settings
-    data = load_data()
-    mute_toggle.checked = data["settings"].get("muted", False)
-    deafen_toggle.checked = data["settings"].get("deafened", False)
-    if data["settings"].get("auto_disconnect_minutes"):
-        timer_input.value = str(data["settings"]["auto_disconnect_minutes"])
+    # Add event listener to refresh server list when ready
+    @bot.listen("on_ready")
+    async def on_bot_ready():
+        """Load server list once bot is ready"""
+        try:
+            # Small delay to ensure bot is fully ready
+            await asyncio.sleep(2)
+            await refresh_server_list()
+            update_all_ui()
+            print("Server list loaded successfully", type_="SUCCESS")
+        except Exception as e:
+            print(f"Error loading initial server list: {e}", type_="ERROR")
+    
+    # Initialize UI synchronously
+    initialize_ui_sync()
+    
+    # Load server list immediately (synchronously)
+    servers_list = []
+    for guild in bot.guilds:
+        try:
+            icon_url = guild.icon.url if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
+            servers_list.append({
+                "id": str(guild.id),
+                "title": guild.name,
+                "iconUrl": icon_url
+            })
+        except Exception as e:
+            print(f"Error processing guild {guild.name}: {e}", type_="ERROR")
+    
+    if servers_list:
+        server_select.items = servers_list
+        print(f"Loaded {len(servers_list)} servers on initialization", type_="INFO")
+    else:
+        server_select.items = [{"id": "none", "title": "No servers available"}]
     
     # Render the tab
     tab.render()
