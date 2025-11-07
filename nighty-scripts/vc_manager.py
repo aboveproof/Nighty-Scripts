@@ -242,7 +242,7 @@ def vc_manager_farm_script():
                     try:
                         await forwardEmbedMethod(
                             channel_id=message.channel.id,
-                            content=f"# ✅ Voice Connected\n\n**Channel:** {after.channel.name}\n**Server:** {after.channel.guild.name}\n**Status:** {'🔇 Deafened' if is_deafened else '🔊 Listening'} | {'🔇 Muted' if is_muted else '🎤 Unmuted'}",
+                            content=f"# Voice Connected\n\n**Channel:** {after.channel.name}\n**Server:** {after.channel.guild.name}\n**Status:** {'Deafened' if is_deafened else 'Listening'} | {'Muted' if is_muted else 'Unmuted'}",
                             title="VC Manager"
                         )
                     finally:
