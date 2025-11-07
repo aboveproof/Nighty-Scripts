@@ -1,102 +1,323 @@
 import json
 import asyncio
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
-def voice_manager_script():
-    VOICE_MANAGER_PATH = Path(getScriptsPath()) / "json" / "voice_manager.json"
-    VOICE_MANAGER_PATH.parent.mkdir(parents=True, exist_ok=True)
-    DEFAULT_CONFIG = {}
+def vc_manager_farm_script():
+    
+    # ==================== INITIALIZATION ====================
+    VC_DATA_PATH = Path(getScriptsPath()) / "json" / "vc_manager_data.json"
+    VC_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
+    DEFAULT_DATA = {
+        "total_vc_time_seconds": 0,
+        "sessions": [],
+        "settings": {
+            "auto_disconnect_minutes": None,
+            "muted": False,
+            "deafened": False
+        }
+    }
+    
+    # Global state
     active_channel = None
-    temp = {}
     connection_start_time = None
-
-    def delete_after():
-        return getConfigData().get('deletetimer', 10)
-
-    def create_config_if_not_exist():
-        if not VOICE_MANAGER_PATH.exists():
-            with open(VOICE_MANAGER_PATH, 'w') as f:
-                json.dump(DEFAULT_CONFIG, f, indent=4)
+    disconnect_task = None
+    stats_update_task = None
+    temp = {}
+    is_muted = False
+    is_deafened = False
+    is_streaming = False
+    is_camera_on = False
     
-    create_config_if_not_exist()
-
-    def get_config():
-        if VOICE_MANAGER_PATH.exists():
-            try:
-                with open(VOICE_MANAGER_PATH, 'r') as f:
+    # ==================== DATA MANAGEMENT ====================
+    def load_data():
+        """Load VC data from JSON file"""
+        try:
+            if VC_DATA_PATH.exists():
+                with open(VC_DATA_PATH, 'r') as f:
                     return json.load(f)
-            except:
-                return DEFAULT_CONFIG
-        else:
-            create_config_if_not_exist()
-            return get_config()
+            else:
+                save_data(DEFAULT_DATA)
+                return DEFAULT_DATA
+        except Exception as e:
+            print(f"Error loading VC data: {e}", type_="ERROR")
+            return DEFAULT_DATA
     
-    def get_connection_duration():
+    def save_data(data):
+        """Save VC data to JSON file"""
+        try:
+            with open(VC_DATA_PATH, 'w') as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"Error saving VC data: {e}", type_="ERROR")
+    
+    # ==================== UTILITY FUNCTIONS ====================
+    def delete_after():
+        """Get delete timer from config"""
+        return getConfigData().get('deletetimer', 10)
+    
+    def format_duration(seconds):
+        """Format seconds into readable duration"""
+        if seconds < 60:
+            return f"{int(seconds)}s"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{minutes}m {secs}s"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = int(seconds % 60)
+            return f"{hours}h {minutes}m {secs}s"
+    
+    def get_current_session_duration():
+        """Get duration of current VC session"""
         if connection_start_time is None:
-            return "Not connected"
-        
-        duration = datetime.now() - connection_start_time
-        hours, remainder = divmod(int(duration.total_seconds()), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        
-        if hours > 0:
-            return f"{hours}h {minutes}m {seconds}s"
-        elif minutes > 0:
-            return f"{minutes}m {seconds}s"
-        else:
-            return f"{seconds}s"
+            return 0
+        return (datetime.now() - connection_start_time).total_seconds()
     
-    async def check_if_connect_success(msg, delay, error_message):
-        await asyncio.sleep(delay)
-        if temp.get('from', None):
-            await msg.edit(f"> {error_message}", delete_after=delete_after())
+    def update_session_stats():
+        """Update session statistics in data file"""
+        if connection_start_time is None:
+            return
+        
+        data = load_data()
+        session_duration = get_current_session_duration()
+        
+        # Add to total time
+        data["total_vc_time_seconds"] += session_duration
+        
+        # Record session
+        session_record = {
+            "channel_id": str(active_channel.id) if active_channel else "unknown",
+            "channel_name": active_channel.name if active_channel else "Unknown",
+            "guild_name": active_channel.guild.name if active_channel and active_channel.guild else "Unknown",
+            "start_time": connection_start_time.isoformat(),
+            "end_time": datetime.now().isoformat(),
+            "duration_seconds": session_duration
+        }
+        
+        data["sessions"].append(session_record)
+        
+        # Keep only last 100 sessions
+        if len(data["sessions"]) > 100:
+            data["sessions"] = data["sessions"][-100:]
+        
+        save_data(data)
     
+    async def schedule_disconnect(minutes):
+        """Schedule automatic disconnect after specified minutes"""
+        nonlocal disconnect_task
+        
+        if disconnect_task:
+            disconnect_task.cancel()
+        
+        if minutes is None or minutes <= 0:
+            return
+        
+        async def disconnect_timer():
+            try:
+                await asyncio.sleep(minutes * 60)
+                if active_channel:
+                    print(f"Auto-disconnect timer expired, leaving VC", type_="INFO")
+                    await connect(None, None)
+            except asyncio.CancelledError:
+                pass
+        
+        disconnect_task = asyncio.create_task(disconnect_timer())
+    
+    # ==================== VOICE CONNECTION ====================
     async def connect(guild_id, channel_id):
+        """Connect to voice channel"""
         payload = {
             "op": 4,
             "d": {
                 "guild_id": guild_id,
                 "channel_id": channel_id,
-                "self_mute": False,
-                "self_deaf": False
+                "self_mute": is_muted,
+                "self_deaf": is_deafened
             }
         }
         await bot.ws.send(json.dumps(payload))
     
+    async def update_voice_state(mute=None, deafen=None, stream=None, camera=None):
+        """Update voice state (mute/deafen/stream/camera)"""
+        nonlocal is_muted, is_deafened, is_streaming, is_camera_on
+        
+        if not active_channel:
+            return False
+        
+        if mute is not None:
+            is_muted = mute
+        if deafen is not None:
+            is_deafened = deafen
+        if stream is not None:
+            is_streaming = stream
+        if camera is not None:
+            is_camera_on = camera
+        
+        payload = {
+            "op": 4,
+            "d": {
+                "guild_id": str(active_channel.guild.id),
+                "channel_id": str(active_channel.id),
+                "self_mute": is_muted,
+                "self_deaf": is_deafened,
+                "self_video": is_camera_on
+            }
+        }
+        await bot.ws.send(json.dumps(payload))
+        
+        # Handle streaming separately if needed
+        if stream is not None:
+            stream_payload = {
+                "op": 18,
+                "d": {
+                    "type": "guild",
+                    "guild_id": str(active_channel.guild.id),
+                    "channel_id": str(active_channel.id),
+                    "preferred_region": None
+                }
+            }
+            if is_streaming:
+                await bot.ws.send(json.dumps(stream_payload))
+        
+        # Update saved settings
+        data = load_data()
+        data["settings"]["muted"] = is_muted
+        data["settings"]["deafened"] = is_deafened
+        save_data(data)
+        
+        return True
+    
+    async def check_if_connect_success(msg, delay, error_message):
+        """Check if connection was successful"""
+        await asyncio.sleep(delay)
+        if temp.get('from', None):
+            await msg.edit(f"> {error_message}", delete_after=delete_after())
+    
+    # ==================== EVENT LISTENERS ====================
     @bot.listen("on_voice_state_update")
     async def on_voice_state_update(member, before, after):
         nonlocal active_channel, temp, connection_start_time
-        if member.id != bot.user.id: 
+        
+        if member.id != bot.user.id:
             return
-
+        
         # Filter if this is the selfbot
         if active_channel:
-            if before.channel and active_channel.id != before.channel.id: 
+            if before.channel and active_channel.id != before.channel.id:
                 return
         else:
-            if not temp.get('from', None): 
+            if not temp.get('from', None):
                 return
         
         channel_id = after.channel.id if after.channel else None
+        
         try:
+            # Update session stats before leaving
+            if before.channel and not after.channel:
+                update_session_stats()
+            
             active_channel = await bot.fetch_channel(channel_id) if channel_id else None
             message = temp.get('msg')
-            _type = temp['type']
-            _from = temp['from']
+            _type = temp.get('type')
+            _from = temp.get('from')
             
             if _from == 'command' and message is not None:
                 if _type == 'join':
                     connection_start_time = datetime.now()
-                    await message.edit(f'> Successfully connected to `{after.channel.name}`', delete_after=delete_after())
+                    
+                    # Schedule auto-disconnect if configured
+                    data = load_data()
+                    auto_disconnect = data["settings"].get("auto_disconnect_minutes")
+                    if auto_disconnect:
+                        await schedule_disconnect(auto_disconnect)
+                    
+                    # Disable private mode temporarily for embed
+                    current_private = getConfigData().get("private")
+                    updateConfigData("private", False)
+                    
+                    try:
+                        await forwardEmbedMethod(
+                            channel_id=message.channel.id,
+                            content=f"# ✅ Voice Connected\n\n**Channel:** {after.channel.name}\n**Server:** {after.channel.guild.name}\n**Status:** {'🔇 Deafened' if is_deafened else '🔊 Listening'} | {'🔇 Muted' if is_muted else '🎤 Unmuted'}",
+                            title="VC Manager"
+                        )
+                    finally:
+                        updateConfigData("private", current_private)
+                    
+                    await message.delete()
                     temp = {}
+                    
                 elif _type == 'leave':
                     connection_start_time = None
                     channel_name = before.channel.name if before.channel else "voice channel"
-                    await message.edit(f'> Successfully disconnected from `{channel_name}`', delete_after=delete_after())
+                    
+                    # Cancel disconnect timer
+                    if disconnect_task:
+                        disconnect_task.cancel()
+                    
+                    # Disable private mode temporarily for embed
+                    current_private = getConfigData().get("private")
+                    updateConfigData("private", False)
+                    
+                    try:
+                        await forwardEmbedMethod(
+                            channel_id=message.channel.id,
+                            content=f"# ❌ Voice Disconnected\n\n**Channel:** {channel_name}\n**Session Duration:** {format_duration(get_current_session_duration())}",
+                            title="VC Manager"
+                        )
+                    finally:
+                        updateConfigData("private", current_private)
+                    
+                    await message.delete()
                     temp = {}
+                    
         except Exception as e:
             print(f"Error in voice state update: {e}", type_="ERROR")
+    
+    # ==================== COMMANDS ====================
+    @bot.command(
+        name="vcstream",
+        description="Toggle fake screen share/stream"
+    )
+    async def vc_stream(ctx, *, args: str = ""):
+        await ctx.message.delete()
+        
+        if not active_channel:
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            return
+        
+        global is_streaming
+        is_streaming = not is_streaming
+        
+        success = await update_voice_state(stream=is_streaming)
+        if success:
+            await ctx.send(f'> {"📺 Started streaming" if is_streaming else "⏹️ Stopped streaming"}', delete_after=delete_after())
+        else:
+            await ctx.send('> ❌ Failed to toggle stream', delete_after=delete_after())
+    
+    @bot.command(
+        name="vccamera",
+        description="Toggle fake camera"
+    )
+    async def vc_camera(ctx, *, args: str = ""):
+        await ctx.message.delete()
+        
+        if not active_channel:
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            return
+        
+        global is_camera_on
+        is_camera_on = not is_camera_on
+        
+        success = await update_voice_state(camera=is_camera_on)
+        if success:
+            await ctx.send(f'> {"📹 Camera enabled" if is_camera_on else "📷 Camera disabled"}', delete_after=delete_after())
+        else:
+            await ctx.send('> ❌ Failed to toggle camera', delete_after=delete_after())
     
     @bot.command(
         name="fakejoinvc",
@@ -113,34 +334,106 @@ def voice_manager_script():
         try:
             channel = await bot.fetch_channel(int(channel_id))
         except:
-            await ctx.send('> Invalid channel ID', delete_after=delete_after())
+            await ctx.send('> ❌ Invalid channel ID', delete_after=delete_after())
             return
-            
+        
         if not isinstance(channel, discord.VoiceChannel):
-            await ctx.send('> Channel is not a voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Channel is not a voice channel', delete_after=delete_after())
             return
         
         temp['type'] = 'join'
         temp['from'] = 'command'
-        temp['msg'] = await ctx.send(f'> Connecting to `{channel.name}`...')
+        temp['msg'] = await ctx.send(f'> 🔄 Connecting to `{channel.name}`...')
+        
         await connect(str(channel.guild.id), str(channel.id))
-
-        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "Failed to connect"))
-
+        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to connect"))
+    
     @bot.command(
-        name="fakeleavevc", 
+        name="fakeleavevc",
         description="Leave current voice channel"
     )
     async def fake_leave_vc(ctx, *, args: str = ""):
         await ctx.message.delete()
         
+        if not active_channel:
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            return
+        
         temp['type'] = 'leave'
         temp['from'] = 'command'
-        temp['msg'] = await ctx.send('> Disconnecting from voice channel...')
+        temp['msg'] = await ctx.send('> 🔄 Disconnecting from voice channel...')
+        
         await connect(None, None)
-
-        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "Failed to disconnect"))
-
+        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to disconnect"))
+    
+    @bot.command(
+        name="vcdeafen",
+        description="Deafen yourself in voice channel"
+    )
+    async def vc_deafen(ctx, *, args: str = ""):
+        await ctx.message.delete()
+        
+        if not active_channel:
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            return
+        
+        success = await update_voice_state(deafen=True)
+        if success:
+            await ctx.send('> 🔇 Deafened', delete_after=delete_after())
+        else:
+            await ctx.send('> ❌ Failed to deafen', delete_after=delete_after())
+    
+    @bot.command(
+        name="vcundeafen",
+        description="Undeafen yourself in voice channel"
+    )
+    async def vc_undeafen(ctx, *, args: str = ""):
+        await ctx.message.delete()
+        
+        if not active_channel:
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            return
+        
+        success = await update_voice_state(deafen=False)
+        if success:
+            await ctx.send('> 🔊 Undeafened', delete_after=delete_after())
+        else:
+            await ctx.send('> ❌ Failed to undeafen', delete_after=delete_after())
+    
+    @bot.command(
+        name="vcmute",
+        description="Mute yourself in voice channel"
+    )
+    async def vc_mute(ctx, *, args: str = ""):
+        await ctx.message.delete()
+        
+        if not active_channel:
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            return
+        
+        success = await update_voice_state(mute=True)
+        if success:
+            await ctx.send('> 🔇 Muted', delete_after=delete_after())
+        else:
+            await ctx.send('> ❌ Failed to mute', delete_after=delete_after())
+    
+    @bot.command(
+        name="vcunmute",
+        description="Unmute yourself in voice channel"
+    )
+    async def vc_unmute(ctx, *, args: str = ""):
+        await ctx.message.delete()
+        
+        if not active_channel:
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            return
+        
+        success = await update_voice_state(mute=False)
+        if success:
+            await ctx.send('> 🎤 Unmuted', delete_after=delete_after())
+        else:
+            await ctx.send('> ❌ Failed to unmute', delete_after=delete_after())
+    
     @bot.command(
         name="vchelp",
         description="Show voice manager help menu"
@@ -150,20 +443,444 @@ def voice_manager_script():
         
         prefix = await bot.get_prefix(ctx.message)
         
+        # Get current status
         current_channel = f"`{active_channel.name}`" if active_channel else "None"
-        connection_duration = get_connection_duration()
+        connection_duration = format_duration(get_current_session_duration()) if connection_start_time else "Not connected"
         
-        help_text = f"""> **Voice Manager Help**
+        # Get statistics
+        data = load_data()
+        total_time = format_duration(data["total_vc_time_seconds"])
+        session_count = len(data["sessions"])
+        
+        # Voice state
+        voice_state = []
+        if active_channel:
+            if is_deafened:
+                voice_state.append("🔇 Deafened")
+            else:
+                voice_state.append("🔊 Listening")
+            
+            if is_muted:
+                voice_state.append("🔇 Muted")
+            else:
+                voice_state.append("🎤 Unmuted")
+        
+        voice_status = " | ".join(voice_state) if voice_state else "N/A"
+        
+        help_text = f"""> **Voice Manager & Farm Help**
 > 
 > **Commands:**
 > `{prefix}fakejoinvc <channel_id>` - Join a voice channel
 > `{prefix}fakeleavevc` - Leave current voice channel
+> `{prefix}vcdeafen` - Deafen yourself
+> `{prefix}vcundeafen` - Undeafen yourself
+> `{prefix}vcmute` - Mute yourself
+> `{prefix}vcunmute` - Unmute yourself
+> `{prefix}vcstream` - Toggle fake screen share
+> `{prefix}vccamera` - Toggle fake camera
 > `{prefix}vchelp` - Show this help menu
 > 
 > **Current Status:**
 > Connected to: {current_channel}
-> Connected for: {connection_duration}"""
-
+> Session Duration: {connection_duration}
+> Voice State: {voice_status}
+> 
+> **Statistics:**
+> Total VC Time: {total_time}
+> Total Sessions: {session_count}"""
+        
         await ctx.send(help_text, delete_after=delete_after())
+    
+    # ==================== UI TAB ====================
+    tab = Tab(name="VC Manager", icon="tube", gap=6)
+    
+    # Main container (columns layout)
+    main_container = tab.create_container(type="columns", gap=6)
+    
+    # Left column - Connection & Status
+    left_container = main_container.create_container(type="rows", width="auto", gap=6)
+    
+    # Connection Card
+    connection_card = left_container.create_card(type="rows", gap=4)
+    connection_card.create_ui_element(UI.Text, content="Voice Connection", size="xl", weight="bold")
+    
+    channel_input = connection_card.create_ui_element(
+        UI.Input,
+        label="Channel ID",
+        placeholder="Enter voice channel ID...",
+        full_width=True
+    )
+    
+    button_group = connection_card.create_group(type="columns", gap=2)
+    join_button = button_group.create_ui_element(
+        UI.Button,
+        label="Connect",
+        variant="cta",
+        color="success"
+    )
+    leave_button = button_group.create_ui_element(
+        UI.Button,
+        label="Disconnect",
+        variant="bordered",
+        color="danger"
+    )
+    
+    # Status Card
+    status_card = left_container.create_card(type="rows", gap=3)
+    status_card.create_ui_element(UI.Text, content="Connection Status", size="lg", weight="bold")
+    
+    status_text = status_card.create_ui_element(
+        UI.Text,
+        content="Status: Disconnected",
+        size="base",
+        color="#888888"
+    )
+    channel_name_text = status_card.create_ui_element(
+        UI.Text,
+        content="Channel: None",
+        size="sm",
+        color="#888888"
+    )
+    channel_id_text = status_card.create_ui_element(
+        UI.Text,
+        content="Channel ID: None",
+        size="sm",
+        color="#888888"
+    )
+    
+    # Right column - Settings & Stats
+    right_container = main_container.create_container(type="rows", gap=6)
+    
+    # Voice Settings Card
+    settings_card = right_container.create_card(type="rows", gap=4)
+    settings_card.create_ui_element(UI.Text, content="Voice Settings", size="xl", weight="bold")
+    
+    mute_toggle = settings_card.create_ui_element(
+        UI.Toggle,
+        label="Mute Microphone",
+        checked=False
+    )
+    deafen_toggle = settings_card.create_ui_element(
+        UI.Toggle,
+        label="Deafen Audio",
+        checked=False
+    )
+    
+    stream_toggle = settings_card.create_ui_element(
+        UI.Toggle,
+        label="Screen Share / Stream",
+        checked=False
+    )
+    
+    camera_toggle = settings_card.create_ui_element(
+        UI.Toggle,
+        label="Camera / Video",
+        checked=False
+    )
+    
+    timer_input = settings_card.create_ui_element(
+        UI.Input,
+        label="Auto-Disconnect Timer",
+        placeholder="Minutes (leave empty to disable)",
+        full_width=True,
+        margin="mt-4"
+    )
+    timer_button = settings_card.create_ui_element(
+        UI.Button,
+        label="Set Timer",
+        variant="solid",
+        color="primary",
+        full_width=True
+    )
+    
+    # Statistics Card
+    stats_card = right_container.create_card(type="rows", gap=3)
+    stats_card.create_ui_element(UI.Text, content="Statistics", size="xl", weight="bold")
+    
+    session_time_text = stats_card.create_ui_element(
+        UI.Text,
+        content="Session Time: 0s",
+        size="base"
+    )
+    total_time_text = stats_card.create_ui_element(
+        UI.Text,
+        content="Total VC Time: 0s",
+        size="base"
+    )
+    session_count_text = stats_card.create_ui_element(
+        UI.Text,
+        content="Total Sessions: 0",
+        size="base"
+    )
+    
+    refresh_button = stats_card.create_ui_element(
+        UI.Button,
+        label="Refresh Stats",
+        variant="ghost",
+        full_width=True,
+        margin="mt-2"
+    )
+    
+    # ==================== UI EVENT HANDLERS ====================
+    async def live_update_stats():
+        """Continuously update stats while connected"""
+        while active_channel:
+            try:
+                await asyncio.sleep(1)  # Update every second
+                if active_channel:
+                    session_duration = get_current_session_duration()
+                    session_time_text.content = f"Session Time: {format_duration(session_duration)}"
+                    
+                    # Also update total time (includes current session)
+                    data = load_data()
+                    total_with_current = data["total_vc_time_seconds"] + session_duration
+                    total_time_text.content = f"Total VC Time: {format_duration(total_with_current)}"
+            except Exception as e:
+                print(f"Error in live stats update: {e}", type_="ERROR")
+                break
+    
+    def update_ui_status():
+        """Update UI with current status"""
+        if active_channel:
+            status_text.content = "Status: 🟢 Connected"
+            status_text.color = "#00FF00"
+            channel_name_text.content = f"Channel: {active_channel.name}"
+            channel_id_text.content = f"Channel ID: {active_channel.id}"
+            
+            session_duration = get_current_session_duration()
+            session_time_text.content = f"Session Time: {format_duration(session_duration)}"
+        else:
+            status_text.content = "Status: 🔴 Disconnected"
+            status_text.color = "#FF0000"
+            channel_name_text.content = "Channel: None"
+            channel_id_text.content = "Channel ID: None"
+            session_time_text.content = "Session Time: 0s"
+        
+        # Update total stats
+        data = load_data()
+        total_time_text.content = f"Total VC Time: {format_duration(data['total_vc_time_seconds'])}"
+        session_count_text.content = f"Total Sessions: {len(data['sessions'])}"
+    
+    async def handle_join():
+        """Handle join button click"""
+        nonlocal active_channel, connection_start_time, temp, stats_update_task
+        
+        channel_id = channel_input.value
+        if not channel_id or not channel_id.strip():
+            tab.toast("Error", "Please enter a channel ID", "ERROR")
+            return
+        
+        join_button.loading = True
+        
+        try:
+            channel = await bot.fetch_channel(int(channel_id.strip()))
+            
+            if not isinstance(channel, discord.VoiceChannel):
+                tab.toast("Error", "Channel is not a voice channel", "ERROR")
+                join_button.loading = False
+                return
+            
+            temp['type'] = 'join'
+            temp['from'] = 'ui'
+            
+            await connect(str(channel.guild.id), str(channel.id))
+            
+            # Wait for connection
+            await asyncio.sleep(2)
+            
+            if active_channel:
+                connection_start_time = datetime.now()
+                
+                # Schedule auto-disconnect if configured
+                data = load_data()
+                auto_disconnect = data["settings"].get("auto_disconnect_minutes")
+                if auto_disconnect:
+                    await schedule_disconnect(auto_disconnect)
+                
+                # Start live stats update
+                if stats_update_task:
+                    stats_update_task.cancel()
+                stats_update_task = asyncio.create_task(live_update_stats())
+                
+                update_ui_status()
+                tab.toast("Success", f"Connected to {channel.name}", "SUCCESS")
+            else:
+                tab.toast("Error", "Failed to connect to voice channel", "ERROR")
+            
+        except Exception as e:
+            tab.toast("Error", f"Failed to join: {str(e)}", "ERROR")
+            print(f"Error joining VC from UI: {e}", type_="ERROR")
+        finally:
+            join_button.loading = False
+            temp = {}
+    
+    async def handle_leave():
+        """Handle leave button click"""
+        nonlocal active_channel, connection_start_time, temp, stats_update_task
+        
+        if not active_channel:
+            tab.toast("Error", "Not connected to any voice channel", "ERROR")
+            return
+        
+        leave_button.loading = True
+        
+        try:
+            temp['type'] = 'leave'
+            temp['from'] = 'ui'
+            
+            # Update stats before leaving
+            update_session_stats()
+            
+            await connect(None, None)
+            
+            # Wait for disconnection
+            await asyncio.sleep(2)
+            
+            active_channel = None
+            connection_start_time = None
+            
+            # Cancel disconnect timer and stats update
+            if disconnect_task:
+                disconnect_task.cancel()
+            if stats_update_task:
+                stats_update_task.cancel()
+            
+            update_ui_status()
+            tab.toast("Success", "Disconnected from voice channel", "SUCCESS")
+            
+        except Exception as e:
+            tab.toast("Error", f"Failed to leave: {str(e)}", "ERROR")
+            print(f"Error leaving VC from UI: {e}", type_="ERROR")
+        finally:
+            leave_button.loading = False
+            temp = {}
+    
+    async def handle_mute_toggle(checked):
+        """Handle mute toggle"""
+        if not active_channel:
+            mute_toggle.checked = not checked
+            tab.toast("Error", "Not connected to any voice channel", "ERROR")
+            return
+        
+        success = await update_voice_state(mute=checked)
+        if success:
+            tab.toast("Success", f"{'Muted' if checked else 'Unmuted'} microphone", "SUCCESS")
+        else:
+            mute_toggle.checked = not checked
+            tab.toast("Error", "Failed to update mute state", "ERROR")
+    
+    async def handle_deafen_toggle(checked):
+        """Handle deafen toggle"""
+        if not active_channel:
+            deafen_toggle.checked = not checked
+            tab.toast("Error", "Not connected to any voice channel", "ERROR")
+            return
+        
+        success = await update_voice_state(deafen=checked)
+        if success:
+            tab.toast("Success", f"{'Deafened' if checked else 'Undeafened'} audio", "SUCCESS")
+        else:
+            deafen_toggle.checked = not checked
+            tab.toast("Error", "Failed to update deafen state", "ERROR")
+    
+    async def handle_stream_toggle(checked):
+        """Handle stream toggle"""
+        if not active_channel:
+            stream_toggle.checked = not checked
+            tab.toast("Error", "Not connected to any voice channel", "ERROR")
+            return
+        
+        success = await update_voice_state(stream=checked)
+        if success:
+            tab.toast("Success", f"{'Started' if checked else 'Stopped'} screen share", "SUCCESS")
+        else:
+            stream_toggle.checked = not checked
+            tab.toast("Error", "Failed to toggle stream", "ERROR")
+    
+    async def handle_camera_toggle(checked):
+        """Handle camera toggle"""
+        if not active_channel:
+            camera_toggle.checked = not checked
+            tab.toast("Error", "Not connected to any voice channel", "ERROR")
+            return
+        
+        success = await update_voice_state(camera=checked)
+        if success:
+            tab.toast("Success", f"Camera {'enabled' if checked else 'disabled'}", "SUCCESS")
+        else:
+            camera_toggle.checked = not checked
+            tab.toast("Error", "Failed to toggle camera", "ERROR")
+    
+    async def handle_set_timer():
+        """Handle timer set button"""
+        timer_value = timer_input.value
+        
+        timer_button.loading = True
+        
+        try:
+            if not timer_value or not timer_value.strip():
+                # Clear timer
+                data = load_data()
+                data["settings"]["auto_disconnect_minutes"] = None
+                save_data(data)
+                
+                if disconnect_task:
+                    disconnect_task.cancel()
+                
+                tab.toast("Success", "Auto-disconnect timer disabled", "SUCCESS")
+            else:
+                minutes = int(timer_value.strip())
+                if minutes <= 0:
+                    tab.toast("Error", "Timer must be greater than 0", "ERROR")
+                    timer_button.loading = False
+                    return
+                
+                # Save timer setting
+                data = load_data()
+                data["settings"]["auto_disconnect_minutes"] = minutes
+                save_data(data)
+                
+                # Schedule if currently connected
+                if active_channel:
+                    await schedule_disconnect(minutes)
+                
+                tab.toast("Success", f"Auto-disconnect set to {minutes} minutes", "SUCCESS")
+        except ValueError:
+            tab.toast("Error", "Invalid number format", "ERROR")
+        except Exception as e:
+            tab.toast("Error", f"Failed to set timer: {str(e)}", "ERROR")
+        finally:
+            timer_button.loading = False
+    
+    def handle_refresh():
+        """Handle refresh stats button"""
+        update_ui_status()
+        tab.toast("Success", "Statistics refreshed", "SUCCESS")
+    
+    # Assign event handlers
+    join_button.onClick = handle_join
+    leave_button.onClick = handle_leave
+    mute_toggle.onChange = handle_mute_toggle
+    deafen_toggle.onChange = handle_deafen_toggle
+    stream_toggle.onChange = handle_stream_toggle
+    camera_toggle.onChange = handle_camera_toggle
+    timer_button.onClick = handle_set_timer
+    refresh_button.onClick = handle_refresh
+    
+    # Initialize UI with current state
+    update_ui_status()
+    
+    # Load saved settings
+    data = load_data()
+    mute_toggle.checked = data["settings"].get("muted", False)
+    deafen_toggle.checked = data["settings"].get("deafened", False)
+    if data["settings"].get("auto_disconnect_minutes"):
+        timer_input.value = str(data["settings"]["auto_disconnect_minutes"])
+    
+    # Render the tab
+    tab.render()
+    
+    print("VC Manager & Farm script loaded successfully", type_="SUCCESS")
 
-voice_manager_script()
+# Initialize the script
+vc_manager_farm_script()
