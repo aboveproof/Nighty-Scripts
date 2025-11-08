@@ -649,7 +649,7 @@ def vc_manager_farm_script():
     tab = Tab(
         title="VC Manager",
         name="VC Manager", 
-        icon="music", 
+        icon="users", 
         gap=6
     )
     
