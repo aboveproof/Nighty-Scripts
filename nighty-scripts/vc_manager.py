@@ -646,7 +646,12 @@ def vc_manager_farm_script():
         await ctx.send(help_text, delete_after=delete_after())
     
     # ==================== UI TAB ====================
-    tab = Tab(name="VC Manager Enhanced", icon="tube", gap=4)
+    tab = Tab(
+        title="VC Manager",
+        name="VC Manager", 
+        icon="music", 
+        gap=6
+    )
     
     # Main container (columns layout)
     main_container = tab.create_container(type="columns", gap=6)
