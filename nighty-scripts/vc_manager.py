@@ -16,13 +16,6 @@ def vc_manager_farm_script():
             "auto_disconnect_minutes": None,
             "muted": False,
             "deafened": False
-        },
-        "current_connection": {
-            "channel_id": None,
-            "channel_name": None,
-            "guild_id": None,
-            "guild_name": None,
-            "connected_at": None
         }
     }
     
@@ -46,17 +39,13 @@ def vc_manager_farm_script():
         try:
             if VC_DATA_PATH.exists():
                 with open(VC_DATA_PATH, 'r') as f:
-                    data = json.load(f)
-                    # Ensure all required keys exist
-                    if "current_connection" not in data:
-                        data["current_connection"] = DEFAULT_DATA["current_connection"].copy()
-                    return data
+                    return json.load(f)
             else:
                 save_data(DEFAULT_DATA)
                 return DEFAULT_DATA
         except Exception as e:
             print(f"Error loading VC data: {e}", type_="ERROR")
-            return DEFAULT_DATA.copy()
+            return DEFAULT_DATA
     
     def save_data(data):
         """Save VC data to JSON file"""
@@ -65,81 +54,6 @@ def vc_manager_farm_script():
                 json.dump(data, f, indent=4)
         except Exception as e:
             print(f"Error saving VC data: {e}", type_="ERROR")
-    
-    def update_connection_state(channel=None):
-        """Update the current connection state in JSON"""
-        data = load_data()
-        
-        if channel:
-            # Save connection info
-            data["current_connection"] = {
-                "channel_id": str(channel.id),
-                "channel_name": channel.name,
-                "guild_id": str(channel.guild.id) if channel.guild else None,
-                "guild_name": channel.guild.name if channel.guild else None,
-                "connected_at": datetime.now().isoformat()
-            }
-        else:
-            # Clear connection info
-            data["current_connection"] = DEFAULT_DATA["current_connection"].copy()
-        
-        save_data(data)
-    
-    async def restore_connection_state():
-        """Restore connection state from saved data on script load"""
-        nonlocal active_channel, connection_start_time, is_muted, is_deafened
-        
-        data = load_data()
-        conn = data.get("current_connection", {})
-        
-        if conn.get("channel_id"):
-            try:
-                channel_id = int(conn["channel_id"])
-                channel = bot.get_channel(channel_id)
-                
-                if not channel:
-                    channel = await bot.fetch_channel(channel_id)
-                
-                # Check if we're actually connected to this channel
-                if bot.user and channel.guild:
-                    member = channel.guild.get_member(bot.user.id)
-                    if member and member.voice and member.voice.channel and member.voice.channel.id == channel.id:
-                        # We're actually connected
-                        active_channel = channel
-                        
-                        # Restore connection time
-                        if conn.get("connected_at"):
-                            connection_start_time = datetime.fromisoformat(conn["connected_at"])
-                        else:
-                            connection_start_time = datetime.now()
-                        
-                        # Restore voice states
-                        is_muted = data["settings"].get("muted", False)
-                        is_deafened = data["settings"].get("deafened", False)
-                        
-                        print(f"Restored connection to: {channel.name}", type_="SUCCESS")
-                        
-                        # Start stats update
-                        if stats_update_task:
-                            stats_update_task.cancel()
-                        asyncio.create_task(live_update_stats())
-                        
-                        # Schedule auto-disconnect if configured
-                        auto_disconnect = data["settings"].get("auto_disconnect_minutes")
-                        if auto_disconnect:
-                            await schedule_disconnect(auto_disconnect)
-                        
-                        return True
-                    else:
-                        # We're not actually connected, clear the state
-                        update_connection_state(None)
-                else:
-                    update_connection_state(None)
-            except Exception as e:
-                print(f"Error restoring connection: {e}", type_="ERROR")
-                update_connection_state(None)
-        
-        return False
     
     # ==================== UTILITY FUNCTIONS ====================
     def delete_after():
@@ -165,6 +79,25 @@ def vc_manager_farm_script():
         if connection_start_time is None:
             return 0
         return (datetime.now() - connection_start_time).total_seconds()
+    
+    def is_actually_connected():
+        """Check if bot is actually in the voice channel"""
+        if not active_channel:
+            return False
+        
+        try:
+            guild = active_channel.guild
+            if not guild:
+                return False
+            
+            member = guild.get_member(bot.user.id)
+            if not member or not member.voice or not member.voice.channel:
+                return False
+            
+            return member.voice.channel.id == active_channel.id
+        except Exception as e:
+            print(f"Error checking connection state: {e}", type_="ERROR")
+            return False
     
     def update_session_stats():
         """Update session statistics in data file"""
@@ -220,8 +153,11 @@ def vc_manager_farm_script():
     def update_all_ui():
         """Update all UI elements to reflect current state"""
         try:
+            # Check actual connection status
+            actually_connected = is_actually_connected()
+            
             # Update connection status
-            if active_channel:
+            if actually_connected:
                 ui_refs['status_text'].content = "Status: 🟢 Connected"
                 ui_refs['status_text'].color = "#00FF00"
                 ui_refs['channel_name_text'].content = f"Channel: {active_channel.name}"
@@ -261,7 +197,7 @@ def vc_manager_farm_script():
                 ui_refs['channel_id_input'].value = ""
             
             # Update voice state toggles when connected
-            if active_channel:
+            if actually_connected:
                 ui_refs['mute_toggle'].checked = is_muted
                 ui_refs['deafen_toggle'].checked = is_deafened
                 ui_refs['stream_toggle'].checked = is_streaming
@@ -304,6 +240,9 @@ def vc_manager_farm_script():
     async def refresh_channel_list(guild_id):
         """Refresh the channel dropdown for selected guild"""
         try:
+            # Clear selection first
+            ui_refs['channel_select'].selected_items = []
+            
             if not guild_id or guild_id == "none":
                 ui_refs['channel_select'].items = [{"id": "none", "title": "Select a server first"}]
                 ui_refs['channel_select'].visible = False
@@ -315,11 +254,23 @@ def vc_manager_farm_script():
                 ui_refs['channel_select'].visible = False
                 return
             
+            # Get the bot's member object to check permissions
+            bot_member = guild.get_member(bot.user.id)
+            if not bot_member:
+                ui_refs['channel_select'].items = [{"id": "none", "title": "Bot not in server"}]
+                ui_refs['channel_select'].visible = False
+                return
+            
             voice_channels = [ch for ch in guild.channels if hasattr(ch, 'user_limit')]
             channel_items = []
             
             for channel in voice_channels:
                 try:
+                    # Check if bot has permission to connect to this channel
+                    permissions = channel.permissions_for(bot_member)
+                    if not permissions.connect:
+                        continue  # Skip channels the bot can't connect to
+                    
                     member_count = len(channel.members) if hasattr(channel, 'members') else 0
                     user_limit = channel.user_limit if channel.user_limit > 0 else "∞"
                     
@@ -333,9 +284,12 @@ def vc_manager_farm_script():
             if channel_items:
                 ui_refs['channel_select'].items = channel_items
                 ui_refs['channel_select'].visible = True
+                # Clear selection again after updating items
+                ui_refs['channel_select'].selected_items = []
             else:
-                ui_refs['channel_select'].items = [{"id": "none", "title": "No voice channels available"}]
+                ui_refs['channel_select'].items = [{"id": "none", "title": "No accessible voice channels"}]
                 ui_refs['channel_select'].visible = True
+                ui_refs['channel_select'].selected_items = []
             
         except Exception as e:
             print(f"Error refreshing channel list: {e}", type_="ERROR")
@@ -360,7 +314,7 @@ def vc_manager_farm_script():
         """Update voice state (mute/deafen/stream/camera)"""
         nonlocal is_muted, is_deafened, is_streaming, is_camera_on
         
-        if not active_channel:
+        if not active_channel or not is_actually_connected():
             return False
         
         if mute is not None:
@@ -419,7 +373,6 @@ def vc_manager_farm_script():
     @bot.listen("on_voice_state_update")
     async def on_voice_state_update(member, before, after):
         nonlocal active_channel, temp, connection_start_time, stats_update_task
-        nonlocal is_muted, is_deafened, is_streaming, is_camera_on
         
         if member.id != bot.user.id:
             return
@@ -447,9 +400,6 @@ def vc_manager_farm_script():
             if _type == 'join':
                 connection_start_time = datetime.now()
                 
-                # Save connection state
-                update_connection_state(active_channel)
-                
                 # Schedule auto-disconnect if configured
                 data = load_data()
                 auto_disconnect = data["settings"].get("auto_disconnect_minutes")
@@ -465,29 +415,19 @@ def vc_manager_farm_script():
                 update_all_ui()
                 
                 if _from == 'command' and message is not None:
-                    # Disable private mode temporarily for embed
-                    current_private = getConfigData().get("private")
-                    updateConfigData("private", False)
-                    
-                    try:
-                        await forwardEmbedMethod(
-                            channel_id=message.channel.id,
-                            content=f"# Voice Connected\n\n**Channel:** {after.channel.name}\n**Server:** {after.channel.guild.name}\n**Status:** {'Deafened' if is_deafened else 'Listening'} | {'Muted' if is_muted else 'Unmuted'}",
-                            title="VC Manager"
-                        )
-                    finally:
-                        updateConfigData("private", current_private)
-                    
-                    await message.delete()
+                    status = 'Deafened' if is_deafened else 'Listening'
+                    mute_status = 'Muted' if is_muted else 'Unmuted'
+                    await message.edit(
+                        content=f"> **Connected to Voice**\n> Channel: `{after.channel.name}`\n> Server: `{after.channel.guild.name}`\n> Status: {status} | {mute_status}",
+                        delete_after=delete_after()
+                    )
                 
                 temp = {}
                 
             elif _type == 'leave':
                 connection_start_time = None
                 channel_name = before.channel.name if before.channel else "voice channel"
-                
-                # Clear connection state
-                update_connection_state(None)
+                session_duration = get_current_session_duration()
                 
                 # Reset all voice states to OFF
                 is_muted = False
@@ -505,20 +445,10 @@ def vc_manager_farm_script():
                 update_all_ui()
                 
                 if _from == 'command' and message is not None:
-                    # Disable private mode temporarily for embed
-                    current_private = getConfigData().get("private")
-                    updateConfigData("private", False)
-                    
-                    try:
-                        await forwardEmbedMethod(
-                            channel_id=message.channel.id,
-                            content=f"# ❌ Voice Disconnected\n\n**Channel:** {channel_name}\n**Session Duration:** {format_duration(get_current_session_duration())}",
-                            title="VC Manager"
-                        )
-                    finally:
-                        updateConfigData("private", current_private)
-                    
-                    await message.delete()
+                    await message.edit(
+                        content=f"> **Disconnected from Voice**\n> Channel: `{channel_name}`\n> Session Duration: {format_duration(session_duration)}",
+                        delete_after=delete_after()
+                    )
                 
                 temp = {}
                 
@@ -533,8 +463,8 @@ def vc_manager_farm_script():
     async def vc_stream(ctx, *, args: str = ""):
         await ctx.message.delete()
         
-        if not active_channel:
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+        if not active_channel or not is_actually_connected():
+            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
             return
         
         nonlocal is_streaming
@@ -542,9 +472,9 @@ def vc_manager_farm_script():
         
         success = await update_voice_state(stream=is_streaming)
         if success:
-            await ctx.send(f'> {"📺 Started streaming" if is_streaming else "⏹️ Stopped streaming"}', delete_after=delete_after())
+            await ctx.send(f'> {"Started streaming" if is_streaming else "Stopped streaming"}', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to toggle stream', delete_after=delete_after())
+            await ctx.send('> Failed to toggle stream', delete_after=delete_after())
     
     @bot.command(
         name="vccamera",
@@ -553,8 +483,8 @@ def vc_manager_farm_script():
     async def vc_camera(ctx, *, args: str = ""):
         await ctx.message.delete()
         
-        if not active_channel:
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+        if not active_channel or not is_actually_connected():
+            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
             return
         
         nonlocal is_camera_on
@@ -562,9 +492,9 @@ def vc_manager_farm_script():
         
         success = await update_voice_state(camera=is_camera_on)
         if success:
-            await ctx.send(f'> {"📹 Camera enabled" if is_camera_on else "📷 Camera disabled"}', delete_after=delete_after())
+            await ctx.send(f'> {"Camera enabled" if is_camera_on else "Camera disabled"}', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to toggle camera', delete_after=delete_after())
+            await ctx.send('> Failed to toggle camera', delete_after=delete_after())
     
     @bot.command(
         name="fakejoinvc",
@@ -581,19 +511,19 @@ def vc_manager_farm_script():
         try:
             channel = await bot.fetch_channel(int(channel_id))
         except:
-            await ctx.send('> ❌ Invalid channel ID', delete_after=delete_after())
+            await ctx.send('> Invalid channel ID', delete_after=delete_after())
             return
         
         if not isinstance(channel, discord.VoiceChannel):
-            await ctx.send('> ❌ Channel is not a voice channel', delete_after=delete_after())
+            await ctx.send('> Channel is not a voice channel', delete_after=delete_after())
             return
         
         temp['type'] = 'join'
         temp['from'] = 'command'
-        temp['msg'] = await ctx.send(f'> 🔄 Connecting to `{channel.name}`...')
+        temp['msg'] = await ctx.send(f'> Connecting to `{channel.name}`...')
         
         await connect(str(channel.guild.id), str(channel.id))
-        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to connect"))
+        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "Failed to connect"))
     
     @bot.command(
         name="fakeleavevc",
@@ -602,8 +532,8 @@ def vc_manager_farm_script():
     async def fake_leave_vc(ctx, *, args: str = ""):
         await ctx.message.delete()
         
-        if not active_channel:
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+        if not active_channel or not is_actually_connected():
+            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
             return
         
         temp['type'] = 'leave'
@@ -611,7 +541,7 @@ def vc_manager_farm_script():
         temp['msg'] = await ctx.send('> 🔄 Disconnecting from voice channel...')
         
         await connect(None, None)
-        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to disconnect"))
+        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "Failed to disconnect"))
     
     @bot.command(
         name="vcdeafen",
@@ -620,15 +550,15 @@ def vc_manager_farm_script():
     async def vc_deafen(ctx, *, args: str = ""):
         await ctx.message.delete()
         
-        if not active_channel:
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+        if not active_channel or not is_actually_connected():
+            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(deafen=True)
         if success:
-            await ctx.send('> 🔇 Deafened', delete_after=delete_after())
+            await ctx.send('> Deafened', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to deafen', delete_after=delete_after())
+            await ctx.send('> Failed to deafen', delete_after=delete_after())
     
     @bot.command(
         name="vcundeafen",
@@ -637,15 +567,15 @@ def vc_manager_farm_script():
     async def vc_undeafen(ctx, *, args: str = ""):
         await ctx.message.delete()
         
-        if not active_channel:
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+        if not active_channel or not is_actually_connected():
+            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(deafen=False)
         if success:
-            await ctx.send('> 🔊 Undeafened', delete_after=delete_after())
+            await ctx.send('> Undeafened', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to undeafen', delete_after=delete_after())
+            await ctx.send('> Failed to undeafen', delete_after=delete_after())
     
     @bot.command(
         name="vcmute",
@@ -654,15 +584,15 @@ def vc_manager_farm_script():
     async def vc_mute(ctx, *, args: str = ""):
         await ctx.message.delete()
         
-        if not active_channel:
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+        if not active_channel or not is_actually_connected():
+            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(mute=True)
         if success:
-            await ctx.send('> 🔇 Muted', delete_after=delete_after())
+            await ctx.send('> Muted', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to mute', delete_after=delete_after())
+            await ctx.send('> Failed to mute', delete_after=delete_after())
     
     @bot.command(
         name="vcunmute",
@@ -671,15 +601,15 @@ def vc_manager_farm_script():
     async def vc_unmute(ctx, *, args: str = ""):
         await ctx.message.delete()
         
-        if not active_channel:
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+        if not active_channel or not is_actually_connected():
+            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(mute=False)
         if success:
-            await ctx.send('> 🎤 Unmuted', delete_after=delete_after())
+            await ctx.send('> Unmuted', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to unmute', delete_after=delete_after())
+            await ctx.send('> Failed to unmute', delete_after=delete_after())
     
     @bot.command(
         name="vchelp",
@@ -691,8 +621,8 @@ def vc_manager_farm_script():
         prefix = await bot.get_prefix(ctx.message)
         
         # Get current status
-        current_channel = f"`{active_channel.name}`" if active_channel else "None"
-        connection_duration = format_duration(get_current_session_duration()) if connection_start_time else "Not connected"
+        current_channel = f"`{active_channel.name}`" if (active_channel and is_actually_connected()) else "None"
+        connection_duration = format_duration(get_current_session_duration()) if (connection_start_time and is_actually_connected()) else "Not connected"
         
         # Get statistics
         data = load_data()
@@ -701,16 +631,16 @@ def vc_manager_farm_script():
         
         # Voice state
         voice_state = []
-        if active_channel:
+        if active_channel and is_actually_connected():
             if is_deafened:
-                voice_state.append("🔇 Deafened")
+                voice_state.append("Deafened")
             else:
-                voice_state.append("🔊 Listening")
+                voice_state.append("Listening")
             
             if is_muted:
-                voice_state.append("🔇 Muted")
+                voice_state.append("Muted")
             else:
-                voice_state.append("🎤 Unmuted")
+                voice_state.append("Unmuted")
         
         voice_status = " | ".join(voice_state) if voice_state else "N/A"
         
@@ -985,14 +915,13 @@ def vc_manager_farm_script():
     # ==================== UI EVENT HANDLERS ====================
     async def live_update_stats():
         """Continuously update stats while connected"""
-        while active_channel:
+        while active_channel and is_actually_connected():
             try:
                 await asyncio.sleep(1)
-                if active_channel:
+                if active_channel and is_actually_connected():
                     session_duration = get_current_session_duration()
                     ui_refs['session_time_text'].content = f"Session Time: {format_duration(session_duration)}"
                     
-                    # Also update total time (includes current session)
                     data = load_data()
                     total_with_current = data["total_vc_time_seconds"] + session_duration
                     ui_refs['total_time_text'].content = f"Total VC Time: {format_duration(total_with_current)}"
@@ -1004,15 +933,12 @@ def vc_manager_farm_script():
         """Handle toggle between server/channel selection and channel ID input"""
         try:
             if checked:
-                # Use channel ID mode
                 ui_refs['server_select'].visible = False
                 ui_refs['channel_select'].visible = False
                 ui_refs['channel_id_input'].visible = True
             else:
-                # Use server/channel selection mode
                 ui_refs['server_select'].visible = True
                 ui_refs['channel_id_input'].visible = False
-                # Show channel select if server is selected
                 if ui_refs['server_select'].selected_items and ui_refs['server_select'].selected_items[0] not in ["loading", "none", "error"]:
                     ui_refs['channel_select'].visible = True
         except Exception as e:
@@ -1021,6 +947,8 @@ def vc_manager_farm_script():
     async def handle_server_select(selected_items):
         """Handle server selection from dropdown"""
         try:
+            ui_refs['channel_select'].selected_items = []
+            
             if not selected_items or selected_items[0] in ["loading", "none", "error"]:
                 ui_refs['channel_select'].visible = False
                 return
@@ -1036,18 +964,15 @@ def vc_manager_farm_script():
         """Handle join button click"""
         nonlocal active_channel, connection_start_time, temp, stats_update_task
         
-        # Check which mode we're in
         use_id_mode = ui_refs['use_channel_id_toggle'].checked
         
         if use_id_mode:
-            # Use channel ID input
             channel_id = ui_refs['channel_id_input'].value
             if not channel_id or not channel_id.strip():
                 tab.toast("Error", "Please enter a channel ID", "ERROR")
                 return
             channel_id = channel_id.strip()
         else:
-            # Use dropdown selection
             selected_channels = ui_refs['channel_select'].selected_items
             if not selected_channels or selected_channels[0] == "none":
                 tab.toast("Error", "Please select a voice channel", "ERROR")
@@ -1068,23 +993,16 @@ def vc_manager_farm_script():
             temp['from'] = 'ui'
             
             await connect(str(channel.guild.id), str(channel.id))
-            
-            # Wait for connection
             await asyncio.sleep(2)
             
-            if active_channel:
+            if active_channel and is_actually_connected():
                 connection_start_time = datetime.now()
                 
-                # Save connection state
-                update_connection_state(active_channel)
-                
-                # Schedule auto-disconnect if configured
                 data = load_data()
                 auto_disconnect = data["settings"].get("auto_disconnect_minutes")
                 if auto_disconnect:
                     await schedule_disconnect(auto_disconnect)
                 
-                # Start live stats update
                 if stats_update_task:
                     stats_update_task.cancel()
                 stats_update_task = asyncio.create_task(live_update_stats())
@@ -1105,7 +1023,7 @@ def vc_manager_farm_script():
         """Handle leave button click"""
         nonlocal active_channel, connection_start_time, temp, stats_update_task, is_muted, is_deafened, is_streaming, is_camera_on
         
-        if not active_channel:
+        if not active_channel or not is_actually_connected():
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
         
@@ -1115,27 +1033,17 @@ def vc_manager_farm_script():
             temp['type'] = 'leave'
             temp['from'] = 'ui'
             
-            # Update stats before leaving
             update_session_stats()
-            
             await connect(None, None)
-            
-            # Wait for disconnection
             await asyncio.sleep(2)
             
             active_channel = None
             connection_start_time = None
-            
-            # Clear connection state
-            update_connection_state(None)
-            
-            # Reset all voice states to OFF
             is_muted = False
             is_deafened = False
             is_streaming = False
             is_camera_on = False
             
-            # Cancel disconnect timer and stats update
             if disconnect_task:
                 disconnect_task.cancel()
             if stats_update_task:
@@ -1164,7 +1072,7 @@ def vc_manager_farm_script():
     
     async def handle_mute_toggle(checked):
         """Handle mute toggle"""
-        if not active_channel:
+        if not active_channel or not is_actually_connected():
             ui_refs['mute_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
@@ -1178,7 +1086,7 @@ def vc_manager_farm_script():
     
     async def handle_deafen_toggle(checked):
         """Handle deafen toggle"""
-        if not active_channel:
+        if not active_channel or not is_actually_connected():
             ui_refs['deafen_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
@@ -1192,7 +1100,7 @@ def vc_manager_farm_script():
     
     async def handle_stream_toggle(checked):
         """Handle stream toggle"""
-        if not active_channel:
+        if not active_channel or not is_actually_connected():
             ui_refs['stream_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
@@ -1206,7 +1114,7 @@ def vc_manager_farm_script():
     
     async def handle_camera_toggle(checked):
         """Handle camera toggle"""
-        if not active_channel:
+        if not active_channel or not is_actually_connected():
             ui_refs['camera_toggle'].checked = not checked
             tab.toast("Error", "Not connected to any voice channel", "ERROR")
             return
@@ -1225,8 +1133,6 @@ def vc_manager_farm_script():
                 return
             
             mode = selected_items[0]
-            
-            # Hide all timer inputs first
             ui_refs['timer_value_select'].visible = False
             ui_refs['custom_time_input'].visible = False
             
@@ -1316,12 +1222,11 @@ def vc_manager_farm_script():
                         return
                     
                     minutes = seconds / 60
-                    
                     data = load_data()
                     data["settings"]["auto_disconnect_minutes"] = minutes
                     save_data(data)
                     
-                    if active_channel:
+                    if active_channel and is_actually_connected():
                         await schedule_disconnect(minutes)
                     
                     tab.toast("Success", f"Auto-disconnect set to {seconds} seconds", "SUCCESS")
@@ -1337,12 +1242,11 @@ def vc_manager_farm_script():
                     return
                 
                 minutes = float(selected_value[0])
-                
                 data = load_data()
                 data["settings"]["auto_disconnect_minutes"] = minutes
                 save_data(data)
                 
-                if active_channel:
+                if active_channel and is_actually_connected():
                     await schedule_disconnect(minutes)
                 
                 if minutes < 60:
@@ -1381,63 +1285,49 @@ def vc_manager_farm_script():
     apply_timer_button.onClick = handle_apply_timer
     refresh_stats_button.onClick = handle_refresh_stats
     
-    # ==================== INITIALIZATION ====================
+    # Initialize UI
     def initialize_ui_sync():
         """Initialize UI with current data synchronously"""
         try:
-            # Load server list immediately
-            servers_list = []
-            for guild in bot.guilds:
-                try:
-                    icon_url = guild.icon.url if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
-                    servers_list.append({
-                        "id": str(guild.id),
-                        "title": guild.name,
-                        "iconUrl": icon_url
-                    })
-                except Exception as e:
-                    print(f"Error processing guild {guild.name}: {e}", type_="ERROR")
-            
-            if servers_list:
-                server_select.items = servers_list
-                print(f"Loaded {len(servers_list)} servers on initialization", type_="INFO")
-            else:
-                server_select.items = [{"id": "none", "title": "No servers available"}]
-            
-            # Update UI with current state
             update_all_ui()
-            
-            print("VC Manager UI initialized successfully", type_="SUCCESS")
+            print("VC Manager Enhanced UI initialized successfully", type_="SUCCESS")
         except Exception as e:
             print(f"Error initializing UI: {e}", type_="ERROR")
     
     @bot.listen("on_ready")
     async def on_bot_ready():
-        """Initialize when bot is ready"""
+        """Load server list once bot is ready"""
         try:
-            await asyncio.sleep(1)
-            
-            # Attempt to restore connection state
-            restored = await restore_connection_state()
-            
-            if not restored:
-                # Just update UI if no connection to restore
-                update_all_ui()
-            
-            # Refresh server list
+            await asyncio.sleep(2)
             await refresh_server_list()
-            
-            print("VC Manager ready", type_="SUCCESS")
+            update_all_ui()
+            print("Server list loaded successfully", type_="SUCCESS")
         except Exception as e:
-            print(f"Error in on_ready: {e}", type_="ERROR")
+            print(f"Error loading initial server list: {e}", type_="ERROR")
     
-    # Initialize UI synchronously
     initialize_ui_sync()
     
-    # Render the tab
-    tab.render()
+    # Load server list immediately
+    servers_list = []
+    for guild in bot.guilds:
+        try:
+            icon_url = guild.icon.url if guild.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
+            servers_list.append({
+                "id": str(guild.id),
+                "title": guild.name,
+                "iconUrl": icon_url
+            })
+        except Exception as e:
+            print(f"Error processing guild {guild.name}: {e}", type_="ERROR")
     
-    print("VC Manager script loaded successfully", type_="SUCCESS")
+    if servers_list:
+        server_select.items = servers_list
+        print(f"Loaded {len(servers_list)} servers on initialization", type_="INFO")
+    else:
+        server_select.items = [{"id": "none", "title": "No servers available"}]
+    
+    tab.render()
+    print("VC Manager & Farm script loaded successfully", type_="SUCCESS")
 
-# Initialize the script
+# Call the function to initialize
 vc_manager_farm_script()
