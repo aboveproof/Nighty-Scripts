@@ -418,7 +418,7 @@ def vc_manager_farm_script():
                     status = 'Deafened' if is_deafened else 'Listening'
                     mute_status = 'Muted' if is_muted else 'Unmuted'
                     await message.edit(
-                        content=f"> **Connected to Voice**\n> Channel: `{after.channel.name}`\n> Server: `{after.channel.guild.name}`\n> Status: {status} | {mute_status}",
+                        content=f"> ✅ **Connected to Voice**\n> Channel: `{after.channel.name}`\n> Server: `{after.channel.guild.name}`\n> Status: {status} | {mute_status}",
                         delete_after=delete_after()
                     )
                 
@@ -446,7 +446,7 @@ def vc_manager_farm_script():
                 
                 if _from == 'command' and message is not None:
                     await message.edit(
-                        content=f"> **Disconnected from Voice**\n> Channel: `{channel_name}`\n> Session Duration: {format_duration(session_duration)}",
+                        content=f"> ❌ **Disconnected from Voice**\n> Channel: `{channel_name}`\n> Session Duration: {format_duration(session_duration)}",
                         delete_after=delete_after()
                     )
                 
@@ -464,7 +464,7 @@ def vc_manager_farm_script():
         await ctx.message.delete()
         
         if not active_channel or not is_actually_connected():
-            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
         nonlocal is_streaming
@@ -472,9 +472,9 @@ def vc_manager_farm_script():
         
         success = await update_voice_state(stream=is_streaming)
         if success:
-            await ctx.send(f'> {"Started streaming" if is_streaming else "Stopped streaming"}', delete_after=delete_after())
+            await ctx.send(f'> {"📺 Started streaming" if is_streaming else "⏹️ Stopped streaming"}', delete_after=delete_after())
         else:
-            await ctx.send('> Failed to toggle stream', delete_after=delete_after())
+            await ctx.send('> ❌ Failed to toggle stream', delete_after=delete_after())
     
     @bot.command(
         name="vccamera",
@@ -484,7 +484,7 @@ def vc_manager_farm_script():
         await ctx.message.delete()
         
         if not active_channel or not is_actually_connected():
-            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
         nonlocal is_camera_on
@@ -492,9 +492,9 @@ def vc_manager_farm_script():
         
         success = await update_voice_state(camera=is_camera_on)
         if success:
-            await ctx.send(f'> {"Camera enabled" if is_camera_on else "Camera disabled"}', delete_after=delete_after())
+            await ctx.send(f'> {"📹 Camera enabled" if is_camera_on else "📷 Camera disabled"}', delete_after=delete_after())
         else:
-            await ctx.send('> Failed to toggle camera', delete_after=delete_after())
+            await ctx.send('> ❌ Failed to toggle camera', delete_after=delete_after())
     
     @bot.command(
         name="fakejoinvc",
@@ -511,19 +511,19 @@ def vc_manager_farm_script():
         try:
             channel = await bot.fetch_channel(int(channel_id))
         except:
-            await ctx.send('> Invalid channel ID', delete_after=delete_after())
+            await ctx.send('> ❌ Invalid channel ID', delete_after=delete_after())
             return
         
         if not isinstance(channel, discord.VoiceChannel):
-            await ctx.send('> Channel is not a voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Channel is not a voice channel', delete_after=delete_after())
             return
         
         temp['type'] = 'join'
         temp['from'] = 'command'
-        temp['msg'] = await ctx.send(f'> Connecting to `{channel.name}`...')
+        temp['msg'] = await ctx.send(f'> 🔄 Connecting to `{channel.name}`...')
         
         await connect(str(channel.guild.id), str(channel.id))
-        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "Failed to connect"))
+        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to connect"))
     
     @bot.command(
         name="fakeleavevc",
@@ -533,7 +533,7 @@ def vc_manager_farm_script():
         await ctx.message.delete()
         
         if not active_channel or not is_actually_connected():
-            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
         temp['type'] = 'leave'
@@ -541,7 +541,7 @@ def vc_manager_farm_script():
         temp['msg'] = await ctx.send('> 🔄 Disconnecting from voice channel...')
         
         await connect(None, None)
-        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "Failed to disconnect"))
+        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to disconnect"))
     
     @bot.command(
         name="vcdeafen",
@@ -551,14 +551,14 @@ def vc_manager_farm_script():
         await ctx.message.delete()
         
         if not active_channel or not is_actually_connected():
-            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(deafen=True)
         if success:
-            await ctx.send('> Deafened', delete_after=delete_after())
+            await ctx.send('> 🔇 Deafened', delete_after=delete_after())
         else:
-            await ctx.send('> Failed to deafen', delete_after=delete_after())
+            await ctx.send('> ❌ Failed to deafen', delete_after=delete_after())
     
     @bot.command(
         name="vcundeafen",
@@ -568,14 +568,14 @@ def vc_manager_farm_script():
         await ctx.message.delete()
         
         if not active_channel or not is_actually_connected():
-            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(deafen=False)
         if success:
-            await ctx.send('> Undeafened', delete_after=delete_after())
+            await ctx.send('> 🔊 Undeafened', delete_after=delete_after())
         else:
-            await ctx.send('> Failed to undeafen', delete_after=delete_after())
+            await ctx.send('> ❌ Failed to undeafen', delete_after=delete_after())
     
     @bot.command(
         name="vcmute",
@@ -585,14 +585,14 @@ def vc_manager_farm_script():
         await ctx.message.delete()
         
         if not active_channel or not is_actually_connected():
-            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(mute=True)
         if success:
-            await ctx.send('> Muted', delete_after=delete_after())
+            await ctx.send('> 🔇 Muted', delete_after=delete_after())
         else:
-            await ctx.send('> Failed to mute', delete_after=delete_after())
+            await ctx.send('> ❌ Failed to mute', delete_after=delete_after())
     
     @bot.command(
         name="vcunmute",
@@ -602,14 +602,14 @@ def vc_manager_farm_script():
         await ctx.message.delete()
         
         if not active_channel or not is_actually_connected():
-            await ctx.send('> Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
             return
         
         success = await update_voice_state(mute=False)
         if success:
-            await ctx.send('> Unmuted', delete_after=delete_after())
+            await ctx.send('> 🎤 Unmuted', delete_after=delete_after())
         else:
-            await ctx.send('> Failed to unmute', delete_after=delete_after())
+            await ctx.send('> ❌ Failed to unmute', delete_after=delete_after())
     
     @bot.command(
         name="vchelp",
@@ -633,14 +633,14 @@ def vc_manager_farm_script():
         voice_state = []
         if active_channel and is_actually_connected():
             if is_deafened:
-                voice_state.append("Deafened")
+                voice_state.append("🔇 Deafened")
             else:
-                voice_state.append("Listening")
+                voice_state.append("🔊 Listening")
             
             if is_muted:
-                voice_state.append("Muted")
+                voice_state.append("🔇 Muted")
             else:
-                voice_state.append("Unmuted")
+                voice_state.append("🎤 Unmuted")
         
         voice_status = " | ".join(voice_state) if voice_state else "N/A"
         
