@@ -350,7 +350,7 @@ def paymentSettings():
         variant="bordered"
     )
 
-    @bot.command(name="payment", aliases=["payment", "pay", "p"])
+    @bot.command(name="payment", aliases=["pay", "p"])
     async def payment(ctx):
         await ctx.message.delete()
         payment = {
