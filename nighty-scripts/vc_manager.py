@@ -1290,7 +1290,7 @@ def vc_manager_farm_script():
         """Initialize UI with current data synchronously"""
         try:
             update_all_ui()
-            print("VC Manager Enhanced UI initialized successfully", type_="SUCCESS")
+            # print("VC Manager Enhanced UI initialized successfully", type_="SUCCESS")
         except Exception as e:
             print(f"Error initializing UI: {e}", type_="ERROR")
     
@@ -1301,7 +1301,7 @@ def vc_manager_farm_script():
             await asyncio.sleep(2)
             await refresh_server_list()
             update_all_ui()
-            print("Server list loaded successfully", type_="SUCCESS")
+            # print("Server list loaded successfully", type_="SUCCESS")
         except Exception as e:
             print(f"Error loading initial server list: {e}", type_="ERROR")
     
@@ -1327,7 +1327,7 @@ def vc_manager_farm_script():
         server_select.items = [{"id": "none", "title": "No servers available"}]
     
     tab.render()
-    print("VC Manager & Farm script loaded successfully", type_="SUCCESS")
+    # print("VC Manager & Farm script loaded successfully", type_="SUCCESS")
 
 # Call the function to initialize
 vc_manager_farm_script()
