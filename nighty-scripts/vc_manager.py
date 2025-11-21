@@ -229,7 +229,7 @@ def vc_manager_farm_script():
             
             if servers_list:
                 ui_refs['server_select'].items = servers_list
-                print(f"Loaded {len(servers_list)} servers", type_="INFO")
+                # print(f"Loaded {len(servers_list)} servers", type_="INFO")
             else:
                 ui_refs['server_select'].items = [{"id": "none", "title": "No servers available"}]
             
@@ -1322,7 +1322,7 @@ def vc_manager_farm_script():
     
     if servers_list:
         server_select.items = servers_list
-        print(f"Loaded {len(servers_list)} servers on initialization", type_="INFO")
+        # print(f"Loaded {len(servers_list)} servers on initialization", type_="INFO")
     else:
         server_select.items = [{"id": "none", "title": "No servers available"}]
     
