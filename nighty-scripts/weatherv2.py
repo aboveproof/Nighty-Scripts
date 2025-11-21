@@ -18,7 +18,8 @@ def weatherScript():
     
     def script_log(message, level="INFO"):
         """Helper function for consistent logging."""
-        pass
+        if level == "ERROR":
+            print(f"[Weather] {message}", type_=level)
     
     async def geocode_location(location):
         """
