@@ -18,7 +18,7 @@ def weatherScript():
     
     def script_log(message, level="INFO"):
         """Helper function for consistent logging."""
-        # print(f"[Weather] {message}", type_=level)
+        pass
     
     async def geocode_location(location):
         """
@@ -67,7 +67,6 @@ def weatherScript():
                         location_parts.append(country)
                     full_name = ", ".join(location_parts)
                     
-                    # script_log(f"Geocoded {location} to {lat}, {lon}", level="INFO")
                     return (lat, lon, full_name)
                     
         except Exception as e:
@@ -104,7 +103,6 @@ def weatherScript():
                 async with session.get(weather_url, params=params, timeout=10) as response:
                     response.raise_for_status()
                     data = await response.json()
-                    # script_log(f"Successfully fetched weather data", level="SUCCESS")
                     return data
                     
         except Exception as e:
@@ -188,10 +186,7 @@ def weatherScript():
         if weather_cache["last_update"]:
             time_diff = now - weather_cache["last_update"]
             if time_diff < timedelta(minutes=15):
-                # script_log("Using cached weather data", level="INFO")
                 return
-        
-        # script_log(f"Updating weather cache for {default_location}", level="INFO")
         
         # Geocode and fetch weather
         geocode_result = await geocode_location(default_location)
@@ -205,7 +200,6 @@ def weatherScript():
             weather_cache["data"] = data
             weather_cache["location_name"] = full_name
             weather_cache["last_update"] = now
-            # script_log("Weather cache updated successfully", level="SUCCESS")
     
     def weather_temp_value():
         """Dynamic value: Returns just the temperature (e.g., '72°F')."""
@@ -353,7 +347,5 @@ def weatherScript():
     
     # Start the background update task
     bot.loop.create_task(weather_update_loop())
-    
-    # script_log("Weather script initialized with dynamic values: {weather_temp}, {weather_full}, {weather_emoji}", level="SUCCESS")
 
 weatherScript()
