@@ -102,7 +102,7 @@ https://raw.githubusercontent.com/username/repository/branch/path/to/script.py
 
 Example:
 ```
-https://raw.githubusercontent.com/rico/nighty-scripts/main/weather_script.py
+https://raw.githubusercontent.com/aboveproof/Nighty-Scripts/refs/heads/main/nighty-scripts/vc_manager.py
 ```
 
 #### Phase 2: Response Validation
