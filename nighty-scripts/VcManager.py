@@ -13,18 +13,18 @@ def vc_manager_farm_script():
     """
     VC MANAGER
     ----------
-    Manage voice channel connections with a full UI panel.  
+    Manage voice channel connections with a full UI panel.
 
     COMMANDS:
     <p>joinvc <channel_id> - Join a voice channel by ID
     <p>leavevc             - Leave current voice channel
-    <p>vcmute                  - Mute microphone
-    <p>vcunmute                - Unmute microphone
-    <p>vcdeafen                - Deafen audio
-    <p>vcundeafen              - Undeafen audio
-    <p>vcstream                - Toggle fake screen share
-    <p>vccamera                - Toggle fake camera
-    <p>vchelp                  - Show help menu
+    <p>vcmute              - Mute microphone
+    <p>vcunmute            - Unmute microphone
+    <p>vcdeafen            - Deafen audio
+    <p>vcundeafen          - Undeafen audio
+    <p>vcstream            - Toggle fake screen share
+    <p>vccamera            - Toggle fake camera
+    <p>vchelp              - Show help menu
     """
 
     # ==================== INITIALIZATION ====================
@@ -171,6 +171,7 @@ def vc_manager_farm_script():
                         connection_start_time = datetime.now()
                     if not stats_update_task or stats_update_task.done():
                         stats_update_task = asyncio.create_task(live_update_stats())
+                    await sync_dropdowns_with_active_channel()
 
                 data = load_data()
                 data["settings"]["muted"] = is_muted
@@ -187,7 +188,7 @@ def vc_manager_farm_script():
             actually_connected = is_actually_connected()
 
             if actually_connected:
-                ui_refs['status_text'].content = "🟢 Connected"
+                ui_refs['status_text'].content = "🟢  Connected"
                 ui_refs['status_text'].color = "#22c55e"
                 ui_refs['channel_name_text'].content = f"Channel: {active_channel.name}"
                 ui_refs['channel_id_text'].content = f"ID: {active_channel.id}"
@@ -203,7 +204,7 @@ def vc_manager_farm_script():
                 ui_refs['stream_toggle'].checked = is_streaming
                 ui_refs['camera_toggle'].checked = is_camera_on
             else:
-                ui_refs['status_text'].content = "🔴 Disconnected"
+                ui_refs['status_text'].content = "🔴  Disconnected"
                 ui_refs['status_text'].color = "#ef4444"
                 ui_refs['channel_name_text'].content = "Channel: -"
                 ui_refs['channel_id_text'].content = "ID: -"
@@ -232,6 +233,23 @@ def vc_manager_farm_script():
 
         except Exception as e:
             print(f"Error updating UI: {e}", type_="ERROR")
+
+    async def sync_dropdowns_with_active_channel():
+        try:
+            if active_channel and active_channel.guild:
+                guild_id_str = str(active_channel.guild.id)
+                channel_id_str = str(active_channel.id)
+
+                ui_refs['use_channel_id_toggle'].checked = False
+                ui_refs['server_select'].visible = True
+                ui_refs['channel_id_input'].visible = False
+
+                ui_refs['server_select'].selected_items = [guild_id_str]
+                await refresh_channel_list(guild_id_str)
+                ui_refs['channel_select'].selected_items = [channel_id_str]
+                ui_refs['channel_select'].visible = True
+        except Exception as e:
+            print(f"Error syncing dropdowns: {e}", type_="ERROR")
 
     async def refresh_server_list():
         try:
@@ -393,11 +411,12 @@ def vc_manager_farm_script():
                     stats_update_task.cancel()
                 stats_update_task = asyncio.create_task(live_update_stats())
                 update_all_ui()
+                await sync_dropdowns_with_active_channel()
                 if _from == 'command' and message is not None:
                     status = 'Deafened' if is_deafened else 'Listening'
                     mute_status = 'Muted' if is_muted else 'Unmuted'
                     await message.edit(
-                        content=f"> ✅ **Connected to Voice**\n> Channel: `{after.channel.name}`\n> Server: `{after.channel.guild.name}`\n> Status: {status} | {mute_status}",
+                        content=f"> `✅` **Connected to Voice**\n> Channel: `{after.channel.name}`\n> Server: `{after.channel.guild.name}`\n> Status: {status} | {mute_status}",
                         delete_after=delete_after()
                     )
                 temp = {}
@@ -428,29 +447,29 @@ def vc_manager_farm_script():
     async def vc_stream(ctx, *, args: str = ""):
         await ctx.message.delete()
         if not active_channel or not is_actually_connected():
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Not connected to any voice channel', delete_after=delete_after())
             return
         nonlocal is_streaming
         is_streaming = not is_streaming
         success = await update_voice_state(stream=is_streaming)
         if success:
-            await ctx.send(f'> {"📺 Started streaming" if is_streaming else "⏹️ Stopped streaming"}', delete_after=delete_after())
+            await ctx.send(f'> {"`📺` Started streaming" if is_streaming else "⏹️ Stopped streaming"}', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to toggle stream', delete_after=delete_after())
+            await ctx.send('> `❌` Failed to toggle stream', delete_after=delete_after())
 
     @bot.command(name="vccamera", description="Toggle fake camera")
     async def vc_camera(ctx, *, args: str = ""):
         await ctx.message.delete()
         if not active_channel or not is_actually_connected():
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Not connected to any voice channel', delete_after=delete_after())
             return
         nonlocal is_camera_on
         is_camera_on = not is_camera_on
         success = await update_voice_state(camera=is_camera_on)
         if success:
-            await ctx.send(f'> {"📹 Camera enabled" if is_camera_on else "📷 Camera disabled"}', delete_after=delete_after())
+            await ctx.send(f'> {"`📹` Camera enabled" if is_camera_on else "📷 Camera disabled"}', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to toggle camera', delete_after=delete_after())
+            await ctx.send('> `❌` Failed to toggle camera', delete_after=delete_after())
 
     @bot.command(name="joinvc", description="Join a voice channel by channel ID")
     async def fake_join_vc(ctx, *, args: str):
@@ -462,14 +481,14 @@ def vc_manager_farm_script():
         try:
             channel = await bot.fetch_channel(int(channel_id))
         except:
-            await ctx.send('> ❌ Invalid channel ID', delete_after=delete_after())
+            await ctx.send('> `❌` Invalid channel ID', delete_after=delete_after())
             return
         if not hasattr(channel, 'user_limit'):
-            await ctx.send('> ❌ Channel is not a voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Channel is not a voice channel', delete_after=delete_after())
             return
         temp['type'] = 'join'
         temp['from'] = 'command'
-        temp['msg'] = await ctx.send(f'> 🔄 Connecting to `{channel.name}`...')
+        temp['msg'] = await ctx.send(f'> `🔄` Connecting to `{channel.name}`...')
         await connect(str(channel.guild.id), str(channel.id))
         asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to connect"))
 
@@ -477,61 +496,61 @@ def vc_manager_farm_script():
     async def fake_leave_vc(ctx, *, args: str = ""):
         await ctx.message.delete()
         if not active_channel or not is_actually_connected():
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Not connected to any voice channel', delete_after=delete_after())
             return
         temp['type'] = 'leave'
         temp['from'] = 'command'
-        temp['msg'] = await ctx.send('> 🔄 Disconnecting from voice channel...')
+        temp['msg'] = await ctx.send('> `🔄` Disconnecting from voice channel...')
         await connect(None, None)
-        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "❌ Failed to disconnect"))
+        asyncio.create_task(check_if_connect_success(temp['msg'], 10, "`❌` Failed to disconnect"))
 
     @bot.command(name="vcdeafen", description="Deafen yourself in voice channel")
     async def vc_deafen(ctx, *, args: str = ""):
         await ctx.message.delete()
         if not active_channel or not is_actually_connected():
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Not connected to any voice channel', delete_after=delete_after())
             return
         success = await update_voice_state(deafen=True)
         if success:
-            await ctx.send('> 🔇 Deafened', delete_after=delete_after())
+            await ctx.send('> `🔇` Deafened', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to deafen', delete_after=delete_after())
+            await ctx.send('> `❌` Failed to deafen', delete_after=delete_after())
 
     @bot.command(name="vcundeafen", description="Undeafen yourself in voice channel")
     async def vc_undeafen(ctx, *, args: str = ""):
         await ctx.message.delete()
         if not active_channel or not is_actually_connected():
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Not connected to any voice channel', delete_after=delete_after())
             return
         success = await update_voice_state(deafen=False)
         if success:
-            await ctx.send('> 🔊 Undeafened', delete_after=delete_after())
+            await ctx.send('> `🔊` Undeafened', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to undeafen', delete_after=delete_after())
+            await ctx.send('> `❌` Failed to undeafen', delete_after=delete_after())
 
     @bot.command(name="vcmute", description="Mute yourself in voice channel")
     async def vc_mute(ctx, *, args: str = ""):
         await ctx.message.delete()
         if not active_channel or not is_actually_connected():
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Not connected to any voice channel', delete_after=delete_after())
             return
         success = await update_voice_state(mute=True)
         if success:
-            await ctx.send('> 🔇 Muted', delete_after=delete_after())
+            await ctx.send('> `🔇` Muted', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to mute', delete_after=delete_after())
+            await ctx.send('> `❌` Failed to mute', delete_after=delete_after())
 
     @bot.command(name="vcunmute", description="Unmute yourself in voice channel")
     async def vc_unmute(ctx, *, args: str = ""):
         await ctx.message.delete()
         if not active_channel or not is_actually_connected():
-            await ctx.send('> ❌ Not connected to any voice channel', delete_after=delete_after())
+            await ctx.send('> `❌` Not connected to any voice channel', delete_after=delete_after())
             return
         success = await update_voice_state(mute=False)
         if success:
-            await ctx.send('> 🎤 Unmuted', delete_after=delete_after())
+            await ctx.send('> `🎤` Unmuted', delete_after=delete_after())
         else:
-            await ctx.send('> ❌ Failed to unmute', delete_after=delete_after())
+            await ctx.send('> `❌` Failed to unmute', delete_after=delete_after())
 
     @bot.command(name="vchelp", description="Show voice manager help menu")
     async def voice_help(ctx, *, args: str = ""):
@@ -549,9 +568,9 @@ def vc_manager_farm_script():
         session_count = len(data["sessions"])
         voice_state = []
         if active_channel and is_actually_connected():
-            voice_state.append("🔇 Deafened" if is_deafened else "🔊 Listening")
-            voice_state.append("🔇 Muted" if is_muted else "🎤 Unmuted")
-        voice_status = " | ".join(voice_state) if voice_state else "N/A"
+            voice_state.append("`🔇` Deafened" if is_deafened else "`🔊` Listening")
+            voice_state.append("`🔇` Muted" if is_muted else "`🎤` Unmuted")
+        voice_status = " | ".join(voice_state) if voice_state else "None"
         help_text = f"""> **VC Manager Help**
 
 > **Commands:**
@@ -829,6 +848,7 @@ def vc_manager_farm_script():
                     stats_update_task.cancel()
                 stats_update_task = asyncio.create_task(live_update_stats())
                 update_all_ui()
+                await sync_dropdowns_with_active_channel()
                 tab.toast("Success", f"Connected to {channel.name}", "SUCCESS")
             else:
                 tab.toast("Error", "Failed to connect to voice channel", "ERROR")
